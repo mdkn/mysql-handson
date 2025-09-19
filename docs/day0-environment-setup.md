@@ -3,220 +3,180 @@
 ## 目標
 - Docker環境でMySQLを構築
 - サンプルデータベースと大量テストデータを準備
+- Makeコマンドで簡単に環境管理
 
-## 1. プロジェクトディレクトリ構造
+## プロジェクトディレクトリ構造
 ```
-mysql-training/
-├── docker-compose.yml
-├── init/
-│   ├── 01_schema.sql
-│   └── 02_test_data.sql
-└── README.md
-```
-
-## 2. docker-compose.yml
-```yaml
-version: '3.8'
-services:
-  mysql:
-    image: mysql:8.0
-    container_name: mysql-training
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: training_db
-      MYSQL_USER: trainee
-      MYSQL_PASSWORD: traineepass
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./init:/docker-entrypoint-initdb.d
-    command: >
-      --character-set-server=utf8mb4
-      --collation-server=utf8mb4_unicode_ci
-      --slow_query_log=1
-      --slow_query_log_file=/var/log/mysql/slow.log
-      --long_query_time=1
-
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin
-    container_name: phpmyadmin
-    environment:
-      PMA_HOST: mysql
-      PMA_USER: root
-      PMA_PASSWORD: rootpassword
-    ports:
-      - "8080:80"
-    depends_on:
-      - mysql
-
-volumes:
-  mysql_data:
+mysql-handson/
+├── Makefile              # 環境管理用
+├── docker-compose.yml    # MySQL設定
+├── init/                 # 初期化スクリプト
+│   ├── 01_schema.sql    # ECサイトスキーマ
+│   └── 02_test_data.sql # 大量テストデータ
+├── logs/                 # MySQLログ出力先
+├── docs/                 # 研修資料
+└── slides/              # プレゼンテーション
 ```
 
-## 3. 環境起動コマンド
+## テーブル構成
+
+```mermaid
+erDiagram
+    users {
+        int id PK "AUTO_INCREMENT"
+        varchar email UK "NOT NULL"
+        varchar name "NOT NULL"
+        timestamp created_at
+        timestamp updated_at
+    }
+    
+    categories {
+        int id PK "AUTO_INCREMENT"
+        varchar name "NOT NULL"
+        int parent_id FK "NULL"
+        timestamp created_at
+    }
+    
+    products {
+        int id PK "AUTO_INCREMENT"
+        varchar name "NOT NULL"
+        decimal price "NOT NULL"
+        int category_id FK
+        int stock_quantity "DEFAULT 0"
+        timestamp created_at
+    }
+    
+    orders {
+        int id PK "AUTO_INCREMENT"
+        int user_id FK "NOT NULL"
+        decimal total_amount "NOT NULL"
+        varchar status "DEFAULT pending"
+        timestamp ordered_at
+    }
+    
+    order_items {
+        int id PK "AUTO_INCREMENT"
+        int order_id FK "NOT NULL"
+        int product_id FK "NOT NULL"
+        int quantity "NOT NULL"
+        decimal price "NOT NULL"
+    }
+    
+    users ||--o{ orders : "places"
+    categories ||--o{ categories : "has_subcategories"
+    categories ||--o{ products : "contains"
+    orders ||--o{ order_items : "has"
+    products ||--o{ order_items : "ordered_in"
+```
+
+## Make環境構築手順
+
+### 1. 使用可能なコマンド確認
 ```bash
-# コンテナ起動
-docker-compose up -d
-
-# MySQL接続確認
-docker exec -it mysql-training mysql -utrainee -ptraineepass training_db
-
-# ログ確認
-docker logs mysql-training
-
-# phpMyAdmin アクセス
-# http://localhost:8080
+make help
 ```
 
-## 4. init/01_schema.sql
-```sql
--- ECサイトのスキーマ定義
-CREATE TABLE users (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
-CREATE TABLE categories (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(100) NOT NULL,
-    parent_id INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (parent_id) REFERENCES categories(id)
-);
-
-CREATE TABLE products (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(255) NOT NULL,
-    price DECIMAL(10, 2) NOT NULL,
-    category_id INT,
-    stock_quantity INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (category_id) REFERENCES categories(id)
-);
-
-CREATE TABLE orders (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT NOT NULL,
-    total_amount DECIMAL(10, 2) NOT NULL,
-    status VARCHAR(50) DEFAULT 'pending',
-    ordered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE order_items (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    order_id INT NOT NULL,
-    product_id INT NOT NULL,
-    quantity INT NOT NULL,
-    price DECIMAL(10, 2) NOT NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(id),
-    FOREIGN KEY (product_id) REFERENCES products(id)
-);
+### 2. MySQL環境の構築
+```bash
+# MySQL環境を構築・起動
+make setup
 ```
 
-## 5. init/02_test_data.sql
-```sql
--- テストデータ生成プロシージャ
-DELIMITER //
+このコマンドで以下が自動実行されます：
+- DockerでMySQL 8.0コンテナを起動
+- データベース `training_db` を作成
+- ECサイトのテーブル構造を構築
+- 大量テストデータを生成（100万ユーザー、50万注文など）
+- スロークエリログを有効化
 
-CREATE PROCEDURE generate_test_data()
-BEGIN
-    DECLARE i INT DEFAULT 1;
-    DECLARE j INT DEFAULT 1;
+### 3. MySQL接続
+```bash
+# 研修用ユーザーで接続
+make connect
 
-    -- カテゴリーデータ（100件）
-    WHILE i <= 100 DO
-        INSERT INTO categories (name, parent_id)
-        VALUES (CONCAT('Category ', i), NULL);
-        SET i = i + 1;
-    END WHILE;
-
-    -- ユーザーデータ（100万件）
-    SET i = 1;
-    WHILE i <= 1000000 DO
-        INSERT INTO users (email, name)
-        VALUES (
-            CONCAT('user', i, '@example.com'),
-            CONCAT('User ', i)
-        );
-
-        -- 1000件ごとにコミット
-        IF i % 1000 = 0 THEN
-            COMMIT;
-        END IF;
-
-        SET i = i + 1;
-    END WHILE;
-
-    -- 商品データ（1万件）
-    SET i = 1;
-    WHILE i <= 10000 DO
-        INSERT INTO products (name, price, category_id, stock_quantity)
-        VALUES (
-            CONCAT('Product ', i),
-            ROUND(RAND() * 10000, 2),
-            FLOOR(1 + RAND() * 100),
-            FLOOR(RAND() * 1000)
-        );
-        SET i = i + 1;
-    END WHILE;
-
-    -- 注文データ（50万件）
-    SET i = 1;
-    WHILE i <= 500000 DO
-        INSERT INTO orders (user_id, total_amount, status, ordered_at)
-        VALUES (
-            FLOOR(1 + RAND() * 1000000),
-            ROUND(RAND() * 50000, 2),
-            ELT(FLOOR(1 + RAND() * 4), 'pending', 'processing', 'completed', 'cancelled'),
-            DATE_SUB(NOW(), INTERVAL FLOOR(RAND() * 365) DAY)
-        );
-
-        -- 注文明細（各注文に1-5個のアイテム）
-        SET j = 1;
-        WHILE j <= FLOOR(1 + RAND() * 5) DO
-            INSERT INTO order_items (order_id, product_id, quantity, price)
-            VALUES (
-                i,
-                FLOOR(1 + RAND() * 10000),
-                FLOOR(1 + RAND() * 10),
-                ROUND(RAND() * 10000, 2)
-            );
-            SET j = j + 1;
-        END WHILE;
-
-        -- 1000件ごとにコミット
-        IF i % 1000 = 0 THEN
-            COMMIT;
-        END IF;
-
-        SET i = i + 1;
-    END WHILE;
-
-    COMMIT;
-END//
-
-DELIMITER ;
-
--- プロシージャ実行
-CALL generate_test_data();
+# 管理者として接続
+make connect-root
 ```
+
+### 4. 環境の状態確認
+```bash
+# コンテナ状態確認
+make status
+
+# MySQLログ確認
+make logs
+
+# スロークエリログ確認
+make slow-logs
+```
+
+### 5. 環境停止・再起動
+```bash
+# 環境停止
+make stop
+
+# 環境再起動
+make restart
+
+# 完全削除（データも削除）
+make clean
+```
+
+## データベース接続設定
+
+- **データベース名**: `training_db`
+- **研修用ユーザー**: `trainee` / パスワード: `traineepass`
+- **管理者ユーザー**: `root` / パスワード: `rootpassword`
+- **ポート**: `3306`
 
 ## 確認課題
-1. MySQLコンテナが正常に起動していることを確認
-2. phpMyAdminでテーブル構造を確認
-3. 各テーブルのレコード数を確認
+
+### 1. 環境起動確認
+```bash
+# 環境構築
+make setup
+
+# 状態確認
+make status
+```
+
+### 2. MySQL接続確認
+```bash
+# MySQL接続
+make connect
+```
+
+### 3. テーブル構造とデータ確認
+MySQL接続後、以下のクエリを実行：
+
 ```sql
+-- データベース使用
+USE training_db;
+
+-- テーブル一覧表示
+SHOW TABLES;
+
+-- 各テーブルのレコード数確認
 SELECT
     'users' AS table_name, COUNT(*) AS record_count FROM users
+UNION ALL
+SELECT 'categories', COUNT(*) FROM categories
 UNION ALL
 SELECT 'products', COUNT(*) FROM products
 UNION ALL
 SELECT 'orders', COUNT(*) FROM orders
 UNION ALL
 SELECT 'order_items', COUNT(*) FROM order_items;
+
+-- テーブル構造確認
+DESCRIBE users;
+DESCRIBE orders;
 ```
+
+### 4. スロークエリログ動作確認
+```bash
+# 別ターミナルでログ監視
+make slow-logs
+```
+
+これで環境構築は完了です。Day 1からクエリチューニングの学習を開始しましょう！
