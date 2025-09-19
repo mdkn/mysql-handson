@@ -5,11 +5,12 @@
 2. [Day 1: JOINの理解と実践](docs/day1-join-understanding.md)
 3. [Day 2: インデックスの基本](docs/day2-index-basics.md)
 4. [Day 3: EXPLAINの読み方](docs/day3-explain-analysis.md)
-5. [Day 4: スロークエリログの活用](docs/day4-slow-query-log.md)
-6. [Day 5: インデックス設計の実践](docs/day5-index-design-practice.md)
-7. [Day 6: クエリ最適化のパターン](docs/day6-query-optimization-patterns.md)
-8. [Day 7: 総合演習](docs/day7-comprehensive-exercises.md)
-9. [Day 8: ケーススタディと知識共有](docs/day8-case-studies-knowledge-sharing.md)
+5. [Day 4: JOINのパフォーマンス](docs/day3.1-join-performance.md)
+6. [Day 4: スロークエリログの活用](docs/day4-slow-query-log.md)
+7. [Day 5: インデックス設計の実践](docs/day5-index-design-practice.md)
+8. [Day 6: クエリ最適化のパターン](docs/day6-query-optimization-patterns.md)
+9. [Day 7: 総合演習](docs/day7-comprehensive-exercises.md)
+10. [Day 8: ケーススタディと知識共有](docs/day8-case-studies-knowledge-sharing.md)
 
 ## 付録・参考資料
 - [コマンドリファレンス](docs/appendix-reference-guide.md)
