@@ -1,0 +1,1 @@
+https://medium.com/@hamidrezaniazi/behind-the-scenes-of-mysql-online-ddl-locks-638804b777b3
