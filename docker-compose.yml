@@ -9,7 +9,7 @@ services:
       MYSQL_USER: trainee
       MYSQL_PASSWORD: traineepass
     ports:
-      - "3306:3306"
+      - "13306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./init:/docker-entrypoint-initdb.d

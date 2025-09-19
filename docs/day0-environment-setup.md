@@ -127,7 +127,8 @@ make clean
 - **データベース名**: `training_db`
 - **研修用ユーザー**: `trainee` / パスワード: `traineepass`
 - **管理者ユーザー**: `root` / パスワード: `rootpassword`
-- **ポート**: `3306`
+- **ポート**: `13306` (ホスト側)
+- **外部接続**: `mysql -h localhost -P 13306 -u trainee -p training_db`
 
 ## 確認課題
 
