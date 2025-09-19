@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 6: クエリ最適化のパターン - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 6</h1>
+                <h2>クエリ最適化のパターン</h2>
+                <p>よくあるアンチパターンを回避し、効率的なクエリを作成</p>
+                <nav class="slide-nav">
+                    <a href="day5.html">← Day 5</a>
+                    <a href="index.html">目次</a>
+                    <a href="day7.html">Day 7 →</a>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">よくあるアンチパターンを認識できる</li>
+                    <li class="fragment">クエリの書き換えによる最適化ができる</li>
+                    <li class="fragment">状況に応じた最適な手法を選択できる</li>
+                    <li class="fragment">ページネーションを効率的に実装できる</li>
+                </ul>
+            </section>
+
+            <!-- サブクエリ vs JOIN -->
+            <section>
+                <h2>🔄 サブクエリ vs JOIN</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ 相関サブクエリ（遅い）</h3>
+                        <pre><code class="language-sql">-- 各ユーザーの最新注文（N+1問題）
+SELECT
+    u.id,
+    u.name,
+    (SELECT MAX(ordered_at)
+     FROM orders o
+     WHERE o.user_id = u.id) as last_order_date,
+    (SELECT COUNT(*)
+     FROM orders o
+     WHERE o.user_id = u.id) as total_orders
+FROM users u
+WHERE u.created_at >= '2024-01-01';</code></pre>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ JOINに書き換え（速い）</h3>
+                        <pre><code class="language-sql">-- GROUP BYとJOINで最適化
+SELECT
+    u.id,
+    u.name,
+    MAX(o.ordered_at) as last_order_date,
+    COUNT(o.id) as total_orders
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+WHERE u.created_at >= '2024-01-01'
+GROUP BY u.id;</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- EXISTS vs IN -->
+            <section>
+                <h2>🔍 EXISTS vs IN</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ IN句（リストが大きい場合は遅い）</h3>
+                        <pre><code class="language-sql">-- 注文のあるユーザー
+SELECT * FROM users
+WHERE id IN (
+    SELECT DISTINCT user_id
+    FROM orders
+    WHERE status = 'completed'
+);</code></pre>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ EXISTS（一般的に高速）</h3>
+                        <pre><code class="language-sql">-- EXISTSで書き換え
+SELECT * FROM users u
+WHERE EXISTS (
+    SELECT 1
+    FROM orders o
+    WHERE o.user_id = u.id
+      AND o.status = 'completed'
+);</code></pre>
+                    </div>
+                </div>
+                <div class="fragment">
+                    <p><strong>💡 ポイント:</strong> EXISTSは最初の一致で処理を停止</p>
+                </div>
+            </section>
+
+            <!-- セミジョイン最適化 -->
+            <section>
+                <h2>🔗 セミジョイン最適化</h2>
+                <div class="fragment">
+                    <h3>MySQL 5.6以降のセミジョイン最適化</h3>
+                    <pre><code class="language-sql">-- JOINで書き換え（重複排除）
+SELECT DISTINCT u.*
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+WHERE o.status = 'completed';</code></pre>
+                </div>
+                <div class="fragment">
+                    <p><strong>注意:</strong> DISTINCTのコストも考慮が必要</p>
+                    <pre><code class="language-sql">-- より効率的な書き方
+SELECT u.*
+FROM users u
+WHERE u.id IN (
+    SELECT user_id
+    FROM orders
+    WHERE status = 'completed'
+    GROUP BY user_id
+);</code></pre>
+                </div>
+            </section>
+
+            <!-- ページネーション：OFFSET/LIMIT -->
+            <section>
+                <h2>📄 ページネーション：OFFSET/LIMIT</h2>
+                <div class="bad-example fragment">
+                    <h3>❌ OFFSET/LIMIT（深いページで遅い）</h3>
+                    <pre><code class="language-sql">-- 10万件目からのデータ取得（遅い）
+SELECT * FROM orders
+ORDER BY id
+LIMIT 20 OFFSET 100000;</code></pre>
+                    <p>OFFSETが大きくなると線形的に遅くなる</p>
+                </div>
+                <div class="fragment">
+                    <h3>実行時間の測定</h3>
+                    <pre><code class="language-sql">SET @start = NOW(6);
+SELECT * FROM orders ORDER BY id LIMIT 20 OFFSET 100000;
+SET @end = NOW(6);
+SELECT TIMEDIFF(@end, @start) as execution_time;</code></pre>
+                </div>
+            </section>
+
+            <!-- シークメソッド -->
+            <section>
+                <h2>🎯 シークメソッド（高速ページネーション）</h2>
+                <div class="good-example fragment">
+                    <h3>✅ シークメソッド（高速）</h3>
+                    <pre><code class="language-sql">-- 前ページの最後のIDを使用
+SELECT * FROM orders
+WHERE id > 100000  -- 前ページの最後のID
+ORDER BY id
+LIMIT 20;</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>キー付きページネーション</h3>
+                    <pre><code class="language-sql">-- 複合条件でのページネーション
+SELECT * FROM orders
+WHERE (ordered_at, id) > ('2024-01-15', 100000)
+ORDER BY ordered_at, id
+LIMIT 20;</code></pre>
+                </div>
+                <div class="fragment">
+                    <p><strong>利点:</strong> ページの深さに関係なく一定の高速性</p>
+                </div>
+            </section>
+
+            <!-- GROUP BYの最適化 -->
+            <section>
+                <h2>📊 GROUP BYの最適化</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ 非効率なGROUP BY</h3>
+                        <pre><code class="language-sql">-- 全カラムを取得してからグループ化（遅い）
+SELECT
+    category_id,
+    COUNT(*) as product_count,
+    AVG(price) as avg_price
+FROM (
+    SELECT * FROM products
+    WHERE stock_quantity > 0
+) as t
+GROUP BY category_id;</code></pre>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ 効率的なGROUP BY</h3>
+                        <pre><code class="language-sql">-- 必要なカラムのみ選択（速い）
+SELECT
+    category_id,
+    COUNT(*) as product_count,
+    AVG(price) as avg_price
+FROM products
+WHERE stock_quantity > 0
+GROUP BY category_id;</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- GROUP BYのインデックス活用 -->
+            <section>
+                <h2>🔑 GROUP BYのインデックス活用</h2>
+                <pre><code class="language-sql">-- インデックスを活用したGROUP BY
+CREATE INDEX idx_products_groupby
+ON products(category_id, stock_quantity, price);
+
+-- このインデックスにより以下が高速化
+SELECT
+    category_id,
+    COUNT(*) as product_count,
+    AVG(price) as avg_price
+FROM products
+WHERE stock_quantity > 0
+GROUP BY category_id;</code></pre>
+                <div class="fragment">
+                    <p><strong>EXPLAIN結果:</strong> Using index for group-by</p>
+                </div>
+            </section>
+
+            <!-- UNION vs UNION ALL -->
+            <section>
+                <h2>🔀 UNION vs UNION ALL</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ UNION（重複除去あり、遅い）</h3>
+                        <pre><code class="language-sql">SELECT user_id FROM orders WHERE status = 'pending'
+UNION
+SELECT user_id FROM orders WHERE status = 'processing';</code></pre>
+                        <p>重複チェックのためのソートが発生</p>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ UNION ALL（重複許可、速い）</h3>
+                        <pre><code class="language-sql">-- 重複を気にしない場合
+SELECT user_id FROM orders WHERE status = 'pending'
+UNION ALL
+SELECT user_id FROM orders WHERE status = 'processing';
+
+-- または IN句で書き換え
+SELECT user_id FROM orders
+WHERE status IN ('pending', 'processing');</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ウィンドウ関数の活用 -->
+            <section>
+                <h2>🪟 ウィンドウ関数の活用</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ 相関サブクエリ</h3>
+                        <pre><code class="language-sql">-- 各ユーザーの累積購入額（古い方法）
+SELECT
+    o1.id,
+    o1.user_id,
+    o1.total_amount,
+    (SELECT SUM(o2.total_amount)
+     FROM orders o2
+     WHERE o2.user_id = o1.user_id
+       AND o2.ordered_at <= o1.ordered_at) as cumulative_amount
+FROM orders o1
+WHERE o1.user_id = 1000;</code></pre>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ ウィンドウ関数（MySQL 8.0以降）</h3>
+                        <pre><code class="language-sql">-- ウィンドウ関数使用
+SELECT
+    id,
+    user_id,
+    total_amount,
+    SUM(total_amount) OVER (
+        PARTITION BY user_id
+        ORDER BY ordered_at
+    ) as cumulative_amount
+FROM orders
+WHERE user_id = 1000;</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- バッチ処理の最適化 -->
+            <section>
+                <h2>📦 バッチ処理の最適化</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ 1行ずつ処理</h3>
+                        <pre><code class="language-sql">-- 悪い例：1行ずつINSERT
+INSERT INTO products (name, price) VALUES ('Product A', 100);
+INSERT INTO products (name, price) VALUES ('Product B', 200);
+INSERT INTO products (name, price) VALUES ('Product C', 300);</code></pre>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ 一括処理</h3>
+                        <pre><code class="language-sql">-- 良い例：複数行を一度にINSERT
+INSERT INTO products (name, price) VALUES
+    ('Product A', 100),
+    ('Product B', 200),
+    ('Product C', 300);
+
+-- 一括UPDATE
+UPDATE products
+SET price = CASE id
+    WHEN 1 THEN 110
+    WHEN 2 THEN 220
+    WHEN 3 THEN 330
+    ELSE price
+END
+WHERE id IN (1, 2, 3);</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 実践演習1: 複雑な集計の最適化 -->
+            <section>
+                <h2>💻 演習1: 複雑な集計の最適化</h2>
+                <h3>最適化前のクエリ</h3>
+                <pre><code class="language-sql">-- カテゴリ別の売上ランキング
+SELECT
+    p.category_id,
+    p.name,
+    SUM(oi.quantity * oi.price) as revenue
+FROM products p
+INNER JOIN order_items oi ON p.id = oi.product_id
+INNER JOIN orders o ON oi.order_id = o.id
+WHERE o.status = 'completed'
+  AND o.ordered_at >= '2024-01-01'
+GROUP BY p.id
+ORDER BY p.category_id, revenue DESC;</code></pre>
+                <div class="fragment">
+                    <p><strong>課題:</strong> このクエリの問題点を特定し、最適化案を考えてください</p>
+                    <p><strong>ヒント:</strong> インデックス、サマリーテーブル、クエリ分割</p>
+                </div>
+            </section>
+
+            <!-- 演習1の解答例 -->
+            <section>
+                <h2>💡 演習1の解答例</h2>
+                <div class="fragment">
+                    <h3>問題点</h3>
+                    <ul>
+                        <li>大量のJOINが発生</li>
+                        <li>集計処理が重い</li>
+                        <li>リアルタイム計算</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <h3>解決策：事前集計テーブル</h3>
+                    <pre><code class="language-sql">-- サマリーテーブルの作成
+CREATE TABLE daily_product_sales (
+    date DATE,
+    product_id INT,
+    category_id INT,
+    revenue DECIMAL(15,2),
+    quantity INT,
+    PRIMARY KEY (date, product_id),
+    INDEX idx_category_revenue (category_id, revenue DESC)
+);
+
+-- 定期的な集計更新（バッチ処理）
+INSERT INTO daily_product_sales
+SELECT
+    DATE(o.ordered_at),
+    oi.product_id,
+    p.category_id,
+    SUM(oi.quantity * oi.price),
+    SUM(oi.quantity)
+FROM orders o
+INNER JOIN order_items oi ON o.id = oi.order_id
+INNER JOIN products p ON oi.product_id = p.id
+WHERE o.status = 'completed'
+  AND DATE(o.ordered_at) = CURDATE() - INTERVAL 1 DAY
+GROUP BY DATE(o.ordered_at), oi.product_id;</code></pre>
+                </div>
+            </section>
+
+            <!-- 実践演習2: N+1問題の解消 -->
+            <section>
+                <h2>💻 演習2: N+1問題の解消</h2>
+                <div class="bad-example fragment">
+                    <h3>❌ アプリケーション側のループ処理</h3>
+                    <pre><code class="language-php">// PHPの例
+foreach ($users as $user) {
+    $orders = $db->query(
+        "SELECT * FROM orders WHERE user_id = ?",
+        [$user->id]
+    );
+    $user->orders = $orders;
+}</code></pre>
+                </div>
+                <div class="good-example fragment">
+                    <h3>✅ 一括取得への書き換え</h3>
+                    <pre><code class="language-sql">-- 一括取得
+SELECT
+    u.*,
+    o.*
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+WHERE u.id IN (1, 2, 3, ...)
+ORDER BY u.id, o.ordered_at DESC;</code></pre>
+                </div>
+            </section>
+
+            <!-- クエリキャッシュの活用 -->
+            <section>
+                <h2>⚡ クエリキャッシュの活用</h2>
+                <div class="fragment">
+                    <h3>MySQL 5.7以前のクエリキャッシュ</h3>
+                    <pre><code class="language-sql">-- クエリキャッシュの設定確認
+SHOW VARIABLES LIKE 'query_cache%';
+
+-- キャッシュ使用状況
+SHOW STATUS LIKE 'Qcache%';</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>MySQL 8.0以降の代替策</h3>
+                    <ul>
+                        <li><strong>アプリケーションレベルキャッシュ:</strong> Redis, Memcached</li>
+                        <li><strong>結果セットキャッシュ:</strong> アプリケーション側で実装</li>
+                        <li><strong>サマリーテーブル:</strong> 事前集計による高速化</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 最適化の判断基準 -->
+            <section>
+                <h2>⚖️ 最適化の判断基準</h2>
+                <div class="decision-matrix">
+                    <div class="fragment">
+                        <h3>優先度の高い最適化</h3>
+                        <ul>
+                            <li>実行時間が5秒以上</li>
+                            <li>実行頻度が高い（1分に10回以上）</li>
+                            <li>ユーザー体験に直接影響</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>最適化手法の選択</h3>
+                        <ul>
+                            <li><strong>インデックス追加:</strong> 単純で効果的</li>
+                            <li><strong>クエリ書き換え:</strong> 根本的な改善</li>
+                            <li><strong>非正規化:</strong> 読み取り性能優先</li>
+                            <li><strong>キャッシュ:</strong> 計算コスト削減</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 確認課題 -->
+            <section>
+                <h2>✅ 確認課題</h2>
+                <ol>
+                    <li class="fragment">相関サブクエリを含むクエリをJOINに書き換えてください</li>
+                    <li class="fragment">OFFSET/LIMITのページネーションを最適化してください</li>
+                    <li class="fragment">GROUP BYクエリにインデックスを適用してください</li>
+                    <li class="fragment">N+1問題を一括取得で解決してください</li>
+                </ol>
+                <div class="fragment">
+                    <p><strong>💡 ヒント:</strong> 実行計画の変化も確認しましょう</p>
+                </div>
+            </section>
+
+            <!-- 最適化チェックリスト -->
+            <section>
+                <h2>📋 最適化チェックリスト</h2>
+                <ul>
+                    <li class="fragment">🔍 <strong>分析:</strong> EXPLAINで実行計画確認</li>
+                    <li class="fragment">📊 <strong>測定:</strong> 実行時間とリソース使用量</li>
+                    <li class="fragment">🎯 <strong>目標設定:</strong> 改善目標の明確化</li>
+                    <li class="fragment">⚡ <strong>実装:</strong> 段階的な改善適用</li>
+                    <li class="fragment">✅ <strong>検証:</strong> 改善効果の確認</li>
+                    <li class="fragment">📝 <strong>文書化:</strong> 改善内容の記録</li>
+                </ul>
+            </section>
+
+            <!-- まとめ -->
+            <section>
+                <h2>📝 Day 6 まとめ</h2>
+                <ul>
+                    <li class="fragment">相関サブクエリはJOINで解決</li>
+                    <li class="fragment">EXISTSはINより効率的</li>
+                    <li class="fragment">深いページネーションはシークメソッドで</li>
+                    <li class="fragment">ウィンドウ関数で複雑な集計を効率化</li>
+                    <li class="fragment">バッチ処理は一括実行が基本</li>
+                </ul>
+                <div class="fragment">
+                    <p><strong>次は総合演習で実践力を身につけましょう!</strong></p>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section data-background-gradient="linear-gradient(to bottom, #17b2c3, #283b95)">
+                <h2>🎯 Next: 総合演習</h2>
+                <p class="fragment">これまでの学習内容を総合的に活用しよう</p>
+                <div class="fragment">
+                    <a href="day7.html" class="cta-button">Day 7: 総合演習へ →</a>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="day5.html">← Day 5</a>
+                    <a href="index.html">目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>

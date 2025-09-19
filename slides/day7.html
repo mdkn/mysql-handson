@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 7: 総合演習 - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 7</h1>
+                <h2>総合演習</h2>
+                <p>実務で遭遇する問題を自力で解決し、チューニングスキルを総合的に実践</p>
+                <nav class="slide-nav">
+                    <a href="day6.html">← Day 6</a>
+                    <a href="index.html">目次</a>
+                    <a href="day8.html">Day 8 →</a>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">実務で遭遇する問題を自力で解決できる</li>
+                    <li class="fragment">分析から改善まで一連の流れを実践できる</li>
+                    <li class="fragment">チューニングの効果を定量的に評価できる</li>
+                    <li class="fragment">複数の最適化手法を組み合わせて活用できる</li>
+                </ul>
+            </section>
+
+            <!-- 演習の進め方 -->
+            <section>
+                <h2>📋 演習の進め方</h2>
+                <ol>
+                    <li class="fragment"><strong>問題分析:</strong> EXPLAINとスロークエリログで現状把握</li>
+                    <li class="fragment"><strong>ボトルネック特定:</strong> 最も影響の大きい問題を特定</li>
+                    <li class="fragment"><strong>改善案立案:</strong> 複数の解決策を検討</li>
+                    <li class="fragment"><strong>実装:</strong> 段階的に改善を適用</li>
+                    <li class="fragment"><strong>効果測定:</strong> 改善前後の比較</li>
+                    <li class="fragment"><strong>文書化:</strong> 改善内容と効果を記録</li>
+                </ol>
+            </section>
+
+            <!-- 演習1: 月次レポート生成の高速化 -->
+            <section>
+                <h2>💻 演習1: 月次レポート生成の高速化</h2>
+                <div class="fragment">
+                    <h3>問題のクエリ（実行時間: 30秒以上）</h3>
+                    <pre><code class="language-sql">SELECT
+    DATE_FORMAT(o.ordered_at, '%Y-%m') as month,
+    u.name as user_name,
+    p.name as product_name,
+    c.name as category_name,
+    oi.quantity,
+    oi.price,
+    o.total_amount,
+    (SELECT COUNT(*)
+     FROM orders
+     WHERE user_id = u.id
+       AND DATE_FORMAT(ordered_at, '%Y-%m') = DATE_FORMAT(o.ordered_at, '%Y-%m')
+    ) as user_monthly_orders,
+    (SELECT SUM(total_amount)
+     FROM orders
+     WHERE user_id = u.id
+       AND DATE_FORMAT(ordered_at, '%Y-%m') = DATE_FORMAT(o.ordered_at, '%Y-%m')
+    ) as user_monthly_total
+FROM orders o
+INNER JOIN users u ON o.user_id = u.id
+INNER JOIN order_items oi ON o.id = oi.order_id
+INNER JOIN products p ON oi.product_id = p.id
+INNER JOIN categories c ON p.category_id = c.id
+WHERE o.ordered_at >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+  AND o.status = 'completed'
+ORDER BY o.ordered_at DESC, u.name;</code></pre>
+                </div>
+            </section>
+
+            <!-- 演習1: 問題分析 -->
+            <section>
+                <h2>🔍 演習1: 問題分析</h2>
+                <div class="fragment">
+                    <h3>ステップ1: EXPLAINで問題特定</h3>
+                    <pre><code class="language-sql">EXPLAIN SELECT
+    DATE_FORMAT(o.ordered_at, '%Y-%m') as month,
+    -- ... (上記クエリ)
+;</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>特定される問題点</h3>
+                    <ul>
+                        <li>相関サブクエリが各行で実行（N+1問題）</li>
+                        <li>DATE_FORMAT関数でインデックスが効かない</li>
+                        <li>大量のJOIN処理</li>
+                        <li>不要な重複計算</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 演習1: 改善案実装 -->
+            <section>
+                <h2>⚡ 演習1: 改善案実装</h2>
+                <div class="fragment">
+                    <h3>改善版クエリ（CTE使用）</h3>
+                    <pre><code class="language-sql">-- ステップ1: 月次集計を事前計算
+WITH monthly_user_stats AS (
+    SELECT
+        user_id,
+        DATE_FORMAT(ordered_at, '%Y-%m') as month,
+        COUNT(*) as monthly_orders,
+        SUM(total_amount) as monthly_total
+    FROM orders
+    WHERE ordered_at >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+      AND status = 'completed'
+    GROUP BY user_id, month
+)
+-- ステップ2: メインクエリで結合
+SELECT
+    DATE_FORMAT(o.ordered_at, '%Y-%m') as month,
+    u.name as user_name,
+    p.name as product_name,
+    c.name as category_name,
+    oi.quantity,
+    oi.price,
+    o.total_amount,
+    mus.monthly_orders as user_monthly_orders,
+    mus.monthly_total as user_monthly_total
+FROM orders o
+INNER JOIN users u ON o.user_id = u.id
+INNER JOIN order_items oi ON o.id = oi.order_id
+INNER JOIN products p ON oi.product_id = p.id
+INNER JOIN categories c ON p.category_id = c.id
+LEFT JOIN monthly_user_stats mus
+    ON mus.user_id = u.id
+    AND mus.month = DATE_FORMAT(o.ordered_at, '%Y-%m')
+WHERE o.ordered_at >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+  AND o.status = 'completed'
+ORDER BY o.ordered_at DESC, u.name;</code></pre>
+                </div>
+            </section>
+
+            <!-- 演習1: インデックス設計 -->
+            <section>
+                <h2>🔑 演習1: 必要なインデックス</h2>
+                <pre><code class="language-sql">-- レポート用の複合インデックス
+CREATE INDEX idx_orders_report
+ON orders(status, ordered_at, user_id, total_amount);
+
+-- JOINの効率化
+CREATE INDEX idx_orderitems_report
+ON order_items(order_id, product_id);
+
+-- 月次集計用
+CREATE INDEX idx_orders_monthly
+ON orders(user_id, ordered_at, status, total_amount);</code></pre>
+                <div class="fragment">
+                    <h3>期待される改善効果</h3>
+                    <ul>
+                        <li>実行時間: 30秒 → 3秒以下</li>
+                        <li>CPU使用率の大幅削減</li>
+                        <li>同時実行への影響軽減</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 演習2: 商品検索の最適化 -->
+            <section>
+                <h2>🔍 演習2: 商品検索の最適化</h2>
+                <div class="fragment">
+                    <h3>問題のクエリ（実行時間: 5秒以上）</h3>
+                    <pre><code class="language-sql">SELECT DISTINCT
+    p.*,
+    c.name as category_name,
+    (SELECT COUNT(*) FROM order_items WHERE product_id = p.id) as sold_count,
+    (SELECT AVG(oi.price) FROM order_items oi WHERE oi.product_id = p.id) as avg_sold_price,
+    CASE
+        WHEN p.stock_quantity = 0 THEN 'out_of_stock'
+        WHEN p.stock_quantity < 10 THEN 'low_stock'
+        ELSE 'in_stock'
+    END as stock_status
+FROM products p
+LEFT JOIN categories c ON p.category_id = c.id
+WHERE (p.name LIKE '%search_term%' OR c.name LIKE '%search_term%')
+  AND p.price BETWEEN 100 AND 10000
+ORDER BY sold_count DESC, p.created_at DESC
+LIMIT 50;</code></pre>
+                </div>
+            </section>
+
+            <!-- 演習2: 段階的改善 -->
+            <section>
+                <h2>🚀 演習2: 段階的改善策</h2>
+                <div class="fragment">
+                    <h3>ステップ1: 事前集計テーブル作成</h3>
+                    <pre><code class="language-sql">-- 商品統計を事前集計
+CREATE TABLE product_stats (
+    product_id INT PRIMARY KEY,
+    sold_count INT DEFAULT 0,
+    avg_sold_price DECIMAL(10,2),
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_sold_count (sold_count DESC)
+);
+
+-- 統計データの更新（定期実行）
+INSERT INTO product_stats (product_id, sold_count, avg_sold_price)
+SELECT
+    product_id,
+    COUNT(*) as sold_count,
+    AVG(price) as avg_sold_price
+FROM order_items
+GROUP BY product_id
+ON DUPLICATE KEY UPDATE
+    sold_count = VALUES(sold_count),
+    avg_sold_price = VALUES(avg_sold_price);</code></pre>
+                </div>
+            </section>
+
+            <!-- 演習2: 最適化クエリ -->
+            <section>
+                <h2>✨ 演習2: 最適化されたクエリ</h2>
+                <div class="fragment">
+                    <h3>ステップ2: 改善されたクエリ</h3>
+                    <pre><code class="language-sql">SELECT
+    p.*,
+    c.name as category_name,
+    COALESCE(ps.sold_count, 0) as sold_count,
+    ps.avg_sold_price,
+    CASE
+        WHEN p.stock_quantity = 0 THEN 'out_of_stock'
+        WHEN p.stock_quantity < 10 THEN 'low_stock'
+        ELSE 'in_stock'
+    END as stock_status
+FROM products p
+LEFT JOIN categories c ON p.category_id = c.id
+LEFT JOIN product_stats ps ON p.id = ps.product_id
+WHERE p.price BETWEEN 100 AND 10000
+  AND (MATCH(p.name) AGAINST('search_term' IN BOOLEAN MODE)
+       OR MATCH(c.name) AGAINST('search_term' IN BOOLEAN MODE))
+ORDER BY ps.sold_count DESC, p.created_at DESC
+LIMIT 50;</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>全文検索インデックス</h3>
+                    <pre><code class="language-sql">-- 全文検索の高速化
+ALTER TABLE products ADD FULLTEXT(name);
+ALTER TABLE categories ADD FULLTEXT(name);</code></pre>
+                </div>
+            </section>
+
+            <!-- 演習3: 管理画面の一覧表示 -->
+            <section>
+                <h2>📊 演習3: 管理画面の一覧表示</h2>
+                <div class="fragment">
+                    <h3>問題のクエリ（深いページで特に遅い）</h3>
+                    <pre><code class="language-sql">-- 管理画面の注文一覧（ページングで遅い）
+SELECT
+    o.*,
+    u.name as user_name,
+    u.email as user_email,
+    COUNT(oi.id) as item_count,
+    GROUP_CONCAT(p.name) as product_names
+FROM orders o
+INNER JOIN users u ON o.user_id = u.id
+LEFT JOIN order_items oi ON o.id = oi.order_id
+LEFT JOIN products p ON oi.product_id = p.id
+GROUP BY o.id
+ORDER BY o.ordered_at DESC
+LIMIT 50 OFFSET 10000;  -- 深いページで特に遅い</code></pre>
+                </div>
+            </section>
+
+            <!-- 演習3: カーソルベースページネーション -->
+            <section>
+                <h2>🎯 演習3: カーソルベースページネーション</h2>
+                <div class="fragment">
+                    <h3>ステップ1: 基本データの高速取得</h3>
+                    <pre><code class="language-sql">-- カーソルベースのページネーション
+SELECT
+    o.*,
+    u.name as user_name,
+    u.email as user_email
+FROM orders o
+INNER JOIN users u ON o.user_id = u.id
+WHERE o.ordered_at < '2024-01-15 10:00:00'  -- 前ページの最後の値
+ORDER BY o.ordered_at DESC
+LIMIT 50;</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>ステップ2: 詳細情報の別取得</h3>
+                    <pre><code class="language-sql">-- 詳細情報は別クエリで取得
+SELECT
+    oi.order_id,
+    COUNT(oi.id) as item_count,
+    GROUP_CONCAT(p.name) as product_names
+FROM order_items oi
+INNER JOIN products p ON oi.product_id = p.id
+WHERE oi.order_id IN (/* 上記で取得したorder_id */)
+GROUP BY oi.order_id;</code></pre>
+                </div>
+            </section>
+
+            <!-- パフォーマンス測定 -->
+            <section>
+                <h2>📈 パフォーマンス測定</h2>
+                <div class="fragment">
+                    <h3>改善効果の定量評価</h3>
+                    <pre><code class="language-sql">-- クエリ実行時間の測定
+SET profiling = 1;
+
+-- 改善前のクエリ実行
+[改善前のクエリ];
+
+-- 改善後のクエリ実行
+[改善後のクエリ];
+
+-- 結果比較
+SHOW PROFILES;</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>詳細な実行統計</h3>
+                    <pre><code class="language-sql">SELECT
+    query_id,
+    state,
+    duration,
+    cpu_user,
+    cpu_system,
+    source_file,
+    source_function
+FROM information_schema.profiling
+WHERE query_id IN (1, 2)
+ORDER BY query_id, seq;</code></pre>
+                </div>
+            </section>
+
+            <!-- 測定結果の記録 -->
+            <section>
+                <h2>📊 測定結果の記録</h2>
+                <div class="measurement-table fragment">
+                    <h3>改善効果まとめ</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>演習</th>
+                                <th>改善前</th>
+                                <th>改善後</th>
+                                <th>改善率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>月次レポート</td>
+                                <td>30秒</td>
+                                <td>2秒</td>
+                                <td>93%向上</td>
+                            </tr>
+                            <tr>
+                                <td>商品検索</td>
+                                <td>5秒</td>
+                                <td>0.5秒</td>
+                                <td>90%向上</td>
+                            </tr>
+                            <tr>
+                                <td>管理画面</td>
+                                <td>3秒（深いページ）</td>
+                                <td>0.3秒</td>
+                                <td>90%向上</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="fragment">
+                    <p><strong>💡 ポイント:</strong> 単純な改善率だけでなく、ユーザー体験への影響も評価</p>
+                </div>
+            </section>
+
+            <!-- 総合課題: ダッシュボード最適化 -->
+            <section>
+                <h2>🎯 総合課題: ダッシュボード最適化</h2>
+                <div class="fragment">
+                    <h3>要件: 1秒以内に全データ表示</h3>
+                    <ul>
+                        <li>リアルタイム売上（今日の売上合計）</li>
+                        <li>人気商品TOP10（過去7日間）</li>
+                        <li>在庫警告（在庫10未満の商品数）</li>
+                        <li>新規ユーザー数（今日の登録数）</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <h3>現状の遅いクエリ（10秒以上）</h3>
+                    <pre><code class="language-sql">SELECT
+    -- リアルタイム売上
+    (SELECT SUM(total_amount)
+     FROM orders
+     WHERE DATE(ordered_at) = CURDATE()
+       AND status = 'completed') as today_revenue,
+
+    -- 人気商品（重いサブクエリ）
+    (SELECT GROUP_CONCAT(
+        CONCAT(p.name, ':', sold_count)
+        ORDER BY sold_count DESC
+        SEPARATOR ', '
+     )
+     FROM (
+        SELECT product_id, SUM(quantity) as sold_count
+        FROM order_items oi
+        INNER JOIN orders o ON oi.order_id = o.id
+        WHERE o.ordered_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        GROUP BY product_id
+        ORDER BY sold_count DESC
+        LIMIT 10
+     ) t
+     INNER JOIN products p ON t.product_id = p.id
+    ) as top_products;</code></pre>
+                </div>
+            </section>
+
+            <!-- 総合課題: 解決策 -->
+            <section>
+                <h2>💡 総合課題: 解決策の検討</h2>
+                <div class="solution-strategies">
+                    <div class="fragment">
+                        <h3>1. マテリアライズドビューの活用</h3>
+                        <pre><code class="language-sql">-- 日次売上サマリー
+CREATE TABLE daily_sales_summary (
+    date DATE PRIMARY KEY,
+    total_revenue DECIMAL(15,2),
+    order_count INT,
+    unique_customers INT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);</code></pre>
+                    </div>
+                    <div class="fragment">
+                        <h3>2. 非正規化テーブル</h3>
+                        <pre><code class="language-sql">-- リアルタイム統計テーブル
+CREATE TABLE realtime_stats (
+    stat_key VARCHAR(50) PRIMARY KEY,
+    stat_value DECIMAL(15,2),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- 例: 今日の売上を常に更新
+INSERT INTO realtime_stats (stat_key, stat_value)
+VALUES ('today_revenue', 0)
+ON DUPLICATE KEY UPDATE
+    stat_value = stat_value + NEW.total_amount;</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 実装戦略 -->
+            <section>
+                <h2>🚀 実装戦略</h2>
+                <div class="implementation-steps">
+                    <div class="fragment">
+                        <h3>段階的実装アプローチ</h3>
+                        <ol>
+                            <li><strong>Phase 1:</strong> インデックス追加による即座の改善</li>
+                            <li><strong>Phase 2:</strong> クエリ書き換えによる根本的改善</li>
+                            <li><strong>Phase 3:</strong> 事前集計テーブルの導入</li>
+                            <li><strong>Phase 4:</strong> キャッシュLayer（Redis等）の検討</li>
+                        </ol>
+                    </div>
+                    <div class="fragment">
+                        <h3>リスク管理</h3>
+                        <ul>
+                            <li>本番環境での段階的適用</li>
+                            <li>パフォーマンス監視の強化</li>
+                            <li>ロールバックプランの準備</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 確認課題 -->
+            <section>
+                <h2>✅ 確認課題</h2>
+                <ol>
+                    <li class="fragment">各演習の改善前後で実行時間を比較してください</li>
+                    <li class="fragment">EXPLAINの変化を記録してください</li>
+                    <li class="fragment">さらなる改善案を検討してください</li>
+                    <li class="fragment">本番環境への適用計画を立ててください</li>
+                </ol>
+                <div class="fragment">
+                    <p><strong>💡 発展課題:</strong> 自社の実際のクエリを1つ選んで最適化してみましょう</p>
+                </div>
+            </section>
+
+            <!-- 学習成果の振り返り -->
+            <section>
+                <h2>🎓 学習成果の振り返り</h2>
+                <div class="learning-outcomes">
+                    <div class="fragment">
+                        <h3>習得したスキル</h3>
+                        <ul>
+                            <li><strong>分析力:</strong> EXPLAINとログでボトルネック特定</li>
+                            <li><strong>設計力:</strong> 適切なインデックス設計</li>
+                            <li><strong>実装力:</strong> クエリ最適化テクニック</li>
+                            <li><strong>測定力:</strong> 改善効果の定量評価</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>実践で得られた知見</h3>
+                        <ul>
+                            <li>複数の改善手法の組み合わせが効果的</li>
+                            <li>段階的なアプローチでリスクを軽減</li>
+                            <li>継続的な監視と改善が重要</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- まとめ -->
+            <section>
+                <h2>📝 Day 7 まとめ</h2>
+                <ul>
+                    <li class="fragment">実務的な問題に対する総合的なアプローチ</li>
+                    <li class="fragment">分析→改善→測定のサイクル実践</li>
+                    <li class="fragment">複数の最適化手法の組み合わせ活用</li>
+                    <li class="fragment">定量的な効果測定の重要性</li>
+                    <li class="fragment">段階的実装によるリスク管理</li>
+                </ul>
+                <div class="fragment">
+                    <p><strong>最終日はケーススタディと知識共有を学習しましょう!</strong></p>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section data-background-gradient="linear-gradient(to bottom, #17b2c3, #283b95)">
+                <h2>🎯 Next: ケーススタディと知識共有</h2>
+                <p class="fragment">実際の障害事例から学び、継続的改善の仕組みを構築しよう</p>
+                <div class="fragment">
+                    <a href="day8.html" class="cta-button">Day 8: ケーススタディと知識共有へ →</a>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="day6.html">← Day 6</a>
+                    <a href="index.html">目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>

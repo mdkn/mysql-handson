@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 3: EXPLAINの読み方 - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 3</h1>
+                <h2>EXPLAINの読み方</h2>
+                <p>実行計画を理解してクエリの問題を発見する</p>
+                <nav class="slide-nav">
+                    <a href="day2.html">← Day 2</a>
+                    <a href="index.html">目次</a>
+                    <a href="day4.html">Day 4 →</a>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">EXPLAIN出力の各項目を理解する</li>
+                    <li class="fragment">実行計画から問題を発見できる</li>
+                    <li class="fragment">クエリの改善ポイントを特定できる</li>
+                    <li class="fragment">EXPLAIN ANALYZEを活用できる</li>
+                </ul>
+            </section>
+
+            <!-- EXPLAINとは -->
+            <section>
+                <h2>🔍 EXPLAINとは？</h2>
+                <div class="fragment">
+                    <p><strong>🧠 MySQLの実行計画を可視化するツール</strong></p>
+                    <ul>
+                        <li>クエリがどのように実行されるかを表示</li>
+                        <li>使用されるインデックスを確認</li>
+                        <li>処理される行数を推定</li>
+                        <li>パフォーマンスのボトルネックを特定</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <p><strong>💡 チューニングに不可欠なツール</strong></p>
+                    <p>「推測するな、測定せよ」の実現</p>
+                </div>
+            </section>
+
+            <!-- EXPLAINの基本使用法 -->
+            <section>
+                <h2>📋 EXPLAINの使い方</h2>
+                <pre><code class="language-sql">-- 通常のEXPLAIN
+EXPLAIN SELECT * FROM users WHERE id = 1000;
+
+-- JSON形式で詳細表示
+EXPLAIN FORMAT=JSON SELECT * FROM users WHERE id = 1000;
+
+-- 実際に実行して統計も表示（MySQL 8.0.18以降）
+EXPLAIN ANALYZE SELECT * FROM users WHERE id = 1000;</code></pre>
+                <div class="fragment">
+                    <p><strong>📊 3つの使い分け:</strong></p>
+                    <ul>
+                        <li><strong>通常版</strong>: 基本的な実行計画</li>
+                        <li><strong>JSON版</strong>: より詳細な情報</li>
+                        <li><strong>ANALYZE版</strong>: 実測値付き</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- EXPLAIN出力項目 -->
+            <section>
+                <h2>📄 EXPLAIN出力項目</h2>
+                <div class="schema-grid">
+                    <div class="fragment">
+                        <h4>id</h4>
+                        <p>SELECTの識別子</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>select_type</h4>
+                        <p>クエリのタイプ</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>table</h4>
+                        <p>対象テーブル</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>type</h4>
+                        <p>アクセスタイプ</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>key</h4>
+                        <p>使用インデックス</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>rows</h4>
+                        <p>調査行数</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>Extra</h4>
+                        <p>追加情報</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- typeカラムの重要性 -->
+            <section>
+                <h2>⚡ typeカラム（性能順）</h2>
+                <div class="join-types">
+                    <div class="fragment" style="background: rgba(40, 167, 69, 0.2);">
+                        <h3>✅ system/const</h3>
+                        <p>主キー検索<br>最高性能</p>
+                    </div>
+                    <div class="fragment" style="background: rgba(40, 167, 69, 0.15);">
+                        <h3>✅ eq_ref</h3>
+                        <p>JOIN時の一意検索<br>非常に高性能</p>
+                    </div>
+                    <div class="fragment" style="background: rgba(40, 167, 69, 0.1);">
+                        <h3>✅ ref</h3>
+                        <p>インデックス検索<br>高性能</p>
+                    </div>
+                    <div class="fragment" style="background: rgba(255, 193, 7, 0.1);">
+                        <h3>⚠️ range</h3>
+                        <p>範囲検索<br>そこそこ</p>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h2>⚠️ typeカラム（要注意）</h2>
+                <div class="join-types">
+                    <div class="fragment" style="background: rgba(255, 193, 7, 0.2);">
+                        <h3>⚠️ index</h3>
+                        <p>インデックスフルスキャン<br>要改善</p>
+                    </div>
+                    <div class="fragment" style="background: rgba(220, 53, 69, 0.2);">
+                        <h3>❌ ALL</h3>
+                        <p>テーブルフルスキャン<br>最悪性能</p>
+                    </div>
+                </div>
+                <div class="fragment">
+                    <p><strong>🎯 目標: ALL と index を減らす</strong></p>
+                    <ul>
+                        <li>適切なインデックスを追加</li>
+                        <li>WHERE条件を見直し</li>
+                        <li>クエリ構造を改善</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 実例: const -->
+            <section>
+                <h2>🎯 type: const（最高性能）</h2>
+                <pre><code class="language-sql">-- PRIMARY KEYまたはUNIQUE INDEXでの検索
+EXPLAIN SELECT * FROM users WHERE id = 1000;</code></pre>
+                <div class="fragment">
+                    <table style="font-size: 0.7em; margin: 1em auto;">
+                        <tr>
+                            <th>id</th><th>select_type</th><th>table</th><th>type</th><th>key</th><th>rows</th>
+                        </tr>
+                        <tr>
+                            <td>1</td><td>SIMPLE</td><td>users</td><td style="color: #28a745;">const</td><td>PRIMARY</td><td>1</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="fragment">
+                    <p><strong>✨ 特徴:</strong></p>
+                    <ul>
+                        <li>最大1行しか返さない</li>
+                        <li>インデックス1回の読み取りで完了</li>
+                        <li>最も効率的なアクセス方法</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 実例: ref -->
+            <section>
+                <h2>🔍 type: ref（高性能）</h2>
+                <pre><code class="language-sql">-- インデックスを使った検索
+EXPLAIN SELECT * FROM orders WHERE user_id = 1000;</code></pre>
+                <div class="fragment">
+                    <table style="font-size: 0.7em; margin: 1em auto;">
+                        <tr>
+                            <th>id</th><th>select_type</th><th>table</th><th>type</th><th>key</th><th>rows</th>
+                        </tr>
+                        <tr>
+                            <td>1</td><td>SIMPLE</td><td>orders</td><td style="color: #28a745;">ref</td><td>idx_user_id</td><td>15</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="fragment">
+                    <p><strong>💡 特徴:</strong></p>
+                    <ul>
+                        <li>インデックスを使って効率的に検索</li>
+                        <li>複数行が返される可能性</li>
+                        <li>一般的に十分高速</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 実例: ALL (危険) -->
+            <section>
+                <h2>⚠️ type: ALL（要改善）</h2>
+                <pre><code class="language-sql">-- インデックスがない場合
+EXPLAIN SELECT * FROM orders WHERE total_amount > 1000;</code></pre>
+                <div class="fragment">
+                    <table style="font-size: 0.7em; margin: 1em auto;">
+                        <tr>
+                            <th>id</th><th>select_type</th><th>table</th><th>type</th><th>key</th><th>rows</th>
+                        </tr>
+                        <tr>
+                            <td>1</td><td>SIMPLE</td><td>orders</td><td style="color: #dc3545;">ALL</td><td>NULL</td><td>500000</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="fragment">
+                    <p><strong>❌ 問題点:</strong></p>
+                    <ul>
+                        <li>テーブル全体をスキャン</li>
+                        <li>50万行すべてを調査</li>
+                        <li>非常に時間がかかる</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Extra カラムの警告サイン -->
+            <section>
+                <h2>🚨 Extraカラムの警告サイン</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ 要注意</h3>
+                        <ul>
+                            <li><strong>Using filesort</strong><br>ソートでインデックス未使用</li>
+                            <li><strong>Using temporary</strong><br>一時テーブルが必要</li>
+                            <li><strong>Using where</strong><br>サーバー側でフィルタリング</li>
+                        </ul>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ 良い状態</h3>
+                        <ul>
+                            <li><strong>Using index</strong><br>カバリングインデックス使用</li>
+                            <li><strong>Using index condition</strong><br>インデックスでプッシュダウン</li>
+                            <li><strong>No extra info</strong><br>最適な状態</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 実践例: 問題のあるクエリ -->
+            <section>
+                <h2>🔍 実践例: 問題のあるクエリ</h2>
+                <pre><code class="language-sql">EXPLAIN SELECT DISTINCT
+    u.name,
+    (SELECT COUNT(*) FROM orders WHERE user_id = u.id) as order_count,
+    (SELECT SUM(total_amount) FROM orders WHERE user_id = u.id) as total_spent
+FROM users u
+WHERE u.created_at >= '2024-01-01';</code></pre>
+                <div class="fragment">
+                    <p><strong>❌ 問題点:</strong></p>
+                    <ul>
+                        <li>相関サブクエリが各行で実行される</li>
+                        <li>N+1問題が発生</li>
+                        <li>非効率なDISTINCT使用</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 改善後のクエリ -->
+            <section>
+                <h2>✅ 改善後のクエリ</h2>
+                <pre><code class="language-sql">EXPLAIN SELECT
+    u.name,
+    COUNT(o.id) as order_count,
+    SUM(o.total_amount) as total_spent
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+WHERE u.created_at >= '2024-01-01'
+GROUP BY u.id;</code></pre>
+                <div class="fragment">
+                    <p><strong>✨ 改善点:</strong></p>
+                    <ul>
+                        <li>相関サブクエリをJOINに変更</li>
+                        <li>1回のクエリで完了</li>
+                        <li>集約処理の効率化</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- EXPLAIN ANALYZE -->
+            <section>
+                <h2>📊 EXPLAIN ANALYZE</h2>
+                <pre><code class="language-sql">-- 実際の実行統計も含めて分析（MySQL 8.0.18以降）
+EXPLAIN ANALYZE
+SELECT
+    DATE_FORMAT(ordered_at, '%Y-%m') as month,
+    COUNT(*) as order_count,
+    SUM(total_amount) as revenue
+FROM orders
+WHERE status = 'completed'
+    AND ordered_at >= '2024-01-01'
+GROUP BY month;</code></pre>
+                <div class="fragment">
+                    <p><strong>🔬 追加情報:</strong></p>
+                    <ul>
+                        <li>実際の実行時間</li>
+                        <li>実際に処理された行数</li>
+                        <li>推定値と実測値の比較</li>
+                        <li>より正確な分析が可能</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- EXPLAIN読み方のコツ -->
+            <section>
+                <h2>🔧 EXPLAIN読み方のコツ</h2>
+                <ol>
+                    <li class="fragment"><strong>typeカラムを最初に確認</strong><br>ALL や index があれば要改善</li>
+                    <li class="fragment"><strong>rowsカラムで影響範囲を把握</strong><br>大きな数値は注意が必要</li>
+                    <li class="fragment"><strong>keyカラムでインデックス使用確認</strong><br>NULLなら インデックス未使用</li>
+                    <li class="fragment"><strong>Extraで追加の問題をチェック</strong><br>filesort や temporary に注意</li>
+                    <li class="fragment"><strong>JOINでは各テーブルを個別分析</strong><br>ボトルネックを特定</li>
+                </ol>
+            </section>
+
+            <!-- 確認課題 -->
+            <section>
+                <h2>✅ 確認課題</h2>
+                <ol>
+                    <li class="fragment">自社の遅いクエリをEXPLAINで分析</li>
+                    <li class="fragment">type: ALLになっているテーブルを特定</li>
+                    <li class="fragment">Using filesort/temporaryを解消する方法を検討</li>
+                </ol>
+                <div class="fragment">
+                    <p><strong>🎯 分析手順:</strong></p>
+                    <pre><code class="language-sql">-- 1. 現状を把握
+EXPLAIN [問題のクエリ];
+
+-- 2. インデックス追加
+CREATE INDEX [適切なインデックス];
+
+-- 3. 効果確認
+EXPLAIN [同じクエリ];</code></pre>
+                </div>
+            </section>
+
+            <!-- まとめ -->
+            <section>
+                <h2>📝 Day 3 まとめ</h2>
+                <ul>
+                    <li class="fragment">EXPLAINはクエリチューニングの必須ツール</li>
+                    <li class="fragment">typeカラムでアクセス方法を把握</li>
+                    <li class="fragment">ALLとindexは改善対象</li>
+                    <li class="fragment">Extraカラムで詳細な問題を発見</li>
+                    <li class="fragment">改善前後で必ずEXPLAINで効果確認</li>
+                </ul>
+                <div class="fragment">
+                    <p><strong>次はスロークエリログで継続的な監視を学習!</strong></p>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section data-background-gradient="linear-gradient(to bottom, #17b2c3, #283b95)">
+                <h2>📊 Next: スロークエリログ</h2>
+                <p class="fragment">問題のあるクエリを継続的に発見・監視しよう</p>
+                <div class="fragment">
+                    <a href="day4.html" class="cta-button">Day 4: スロークエリログへ →</a>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="day2.html">← Day 2</a>
+                    <a href="index.html">目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 0: 環境構築 - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 0</h1>
+                <h2>環境構築</h2>
+                <p>Docker環境でMySQLを構築し、研修用データを準備</p>
+                <nav class="slide-nav">
+                    <a href="index.html">← 目次に戻る</a>
+                    <a href="day1.html">Day 1へ →</a>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">Docker環境でMySQLを構築する</li>
+                    <li class="fragment">サンプルデータベースと大量テストデータを準備する</li>
+                    <li class="fragment">phpMyAdminでGUI操作環境を整える</li>
+                    <li class="fragment">研修で使用するツール群を理解する</li>
+                </ul>
+            </section>
+
+            <!-- ディレクトリ構造 -->
+            <section>
+                <h2>📁 プロジェクト構成</h2>
+                <pre><code class="language-text">mysql-training/
+├── docker-compose.yml
+├── init/
+│   ├── 01_schema.sql
+│   └── 02_test_data.sql
+└── README.md</code></pre>
+                <div class="fragment">
+                    <p><strong>各ファイルの役割:</strong></p>
+                    <ul>
+                        <li><code>docker-compose.yml</code>: MySQLとphpMyAdminの定義</li>
+                        <li><code>init/</code>: データベース初期化スクリプト</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Docker Compose設定 -->
+            <section>
+                <h2>🐳 Docker Compose設定</h2>
+                <pre><code class="language-yaml">version: '3.8'
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-training
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: training_db
+      MYSQL_USER: trainee
+      MYSQL_PASSWORD: traineepass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init:/docker-entrypoint-initdb.d</code></pre>
+            </section>
+
+            <!-- MySQL設定 -->
+            <section>
+                <h2>⚙️ MySQL設定</h2>
+                <pre><code class="language-yaml">    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --slow_query_log=1
+      --slow_query_log_file=/var/log/mysql/slow.log
+      --long_query_time=1</code></pre>
+                <div class="fragment">
+                    <p><strong>重要な設定:</strong></p>
+                    <ul>
+                        <li><code>slow_query_log=1</code>: スロークエリログを有効化</li>
+                        <li><code>long_query_time=1</code>: 1秒以上のクエリを記録</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- phpMyAdmin設定 -->
+            <section>
+                <h2>🖥️ phpMyAdmin設定</h2>
+                <pre><code class="language-yaml">  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: root
+      PMA_PASSWORD: rootpassword
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql</code></pre>
+                <p class="fragment">ブラウザで <strong>http://localhost:8080</strong> からアクセス可能</p>
+            </section>
+
+            <!-- 環境起動 -->
+            <section>
+                <h2>🚀 環境起動手順</h2>
+                <pre><code class="language-bash"># 1. コンテナ起動
+docker-compose up -d
+
+# 2. MySQL接続確認
+docker exec -it mysql-training mysql -utrainee -ptraineepass training_db
+
+# 3. ログ確認
+docker logs mysql-training
+
+# 4. phpMyAdmin確認
+# http://localhost:8080 をブラウザで開く</code></pre>
+            </section>
+
+            <!-- スキーマ定義 -->
+            <section>
+                <h2>🗄️ データベーススキーマ</h2>
+                <p>ECサイトを想定した5つのテーブル:</p>
+                <div class="schema-grid">
+                    <div class="fragment">
+                        <h4>users</h4>
+                        <p>ユーザー情報</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>categories</h4>
+                        <p>商品カテゴリ</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>products</h4>
+                        <p>商品マスタ</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>orders</h4>
+                        <p>注文データ</p>
+                    </div>
+                    <div class="fragment">
+                        <h4>order_items</h4>
+                        <p>注文明細</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- テストデータ -->
+            <section>
+                <h2>📊 テストデータ規模</h2>
+                <div class="data-stats">
+                    <div class="stat-item fragment">
+                        <div class="stat-number">1,000,000</div>
+                        <div class="stat-label">ユーザー</div>
+                    </div>
+                    <div class="stat-item fragment">
+                        <div class="stat-number">10,000</div>
+                        <div class="stat-label">商品</div>
+                    </div>
+                    <div class="stat-item fragment">
+                        <div class="stat-number">500,000</div>
+                        <div class="stat-label">注文</div>
+                    </div>
+                    <div class="stat-item fragment">
+                        <div class="stat-number">2,000,000+</div>
+                        <div class="stat-label">注文明細</div>
+                    </div>
+                </div>
+                <p class="fragment"><strong>実際のWebサービスに近い規模でのパフォーマンス検証が可能!</strong></p>
+            </section>
+
+            <!-- データ生成プロセス -->
+            <section>
+                <h2>⚡ データ生成プロセス</h2>
+                <pre><code class="language-sql">-- プロシージャによる効率的なデータ生成
+DELIMITER //
+CREATE PROCEDURE generate_test_data()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+
+    -- ユーザーデータ（100万件）
+    WHILE i <= 1000000 DO
+        INSERT INTO users (email, name)
+        VALUES (
+            CONCAT('user', i, '@example.com'),
+            CONCAT('User ', i)
+        );
+
+        -- 1000件ごとにコミット
+        IF i % 1000 = 0 THEN
+            COMMIT;
+        END IF;
+
+        SET i = i + 1;
+    END WHILE;
+END//</code></pre>
+            </section>
+
+            <!-- 確認課題 -->
+            <section>
+                <h2>✅ 確認課題</h2>
+                <ol>
+                    <li class="fragment">MySQLコンテナが正常に起動していることを確認</li>
+                    <li class="fragment">phpMyAdminでテーブル構造を確認</li>
+                    <li class="fragment">各テーブルのレコード数を確認</li>
+                </ol>
+                <div class="fragment">
+                    <pre><code class="language-sql">SELECT
+    'users' AS table_name, COUNT(*) AS record_count FROM users
+UNION ALL
+SELECT 'products', COUNT(*) FROM products
+UNION ALL
+SELECT 'orders', COUNT(*) FROM orders
+UNION ALL
+SELECT 'order_items', COUNT(*) FROM order_items;</code></pre>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section data-background-gradient="linear-gradient(to bottom, #17b2c3, #283b95)">
+                <h2>🎉 環境構築完了!</h2>
+                <p class="fragment">これで研修を始める準備が整いました</p>
+                <div class="fragment">
+                    <p><strong>次は JOINの理解と実践 を学習しましょう</strong></p>
+                    <a href="day1.html" class="cta-button">Day 1: JOINの理解と実践へ →</a>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="index.html">← 目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>

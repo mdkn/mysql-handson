@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 1: JOINの理解と実践 - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 1</h1>
+                <h2>JOINの理解と実践</h2>
+                <p>各種JOINを使い分けて効率的なテーブル結合を実現</p>
+                <nav class="slide-nav">
+                    <a href="day0.html">← Day 0</a>
+                    <a href="index.html">目次</a>
+                    <a href="day2.html">Day 2 →</a>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">各種JOINの違いを理解し、適切に使い分けられる</li>
+                    <li class="fragment">複数テーブルを結合した実務的なクエリが書ける</li>
+                    <li class="fragment">JOINのパフォーマンスを意識した設計ができる</li>
+                    <li class="fragment">N+1問題などのアンチパターンを回避できる</li>
+                </ul>
+            </section>
+
+            <!-- JOINの種類 -->
+            <section>
+                <h2>🔗 JOINの種類</h2>
+                <div class="join-types">
+                    <div class="fragment">
+                        <h3>INNER JOIN</h3>
+                        <p>両方のテーブルに存在するデータのみ</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>LEFT JOIN</h3>
+                        <p>左側のテーブルの全データ + 右側の一致するデータ</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>RIGHT JOIN</h3>
+                        <p>右側のテーブルの全データ + 左側の一致するデータ</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>FULL OUTER JOIN</h3>
+                        <p>両方のテーブルの全データ（MySQL非対応）</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- INNER JOIN -->
+            <section>
+                <h2>⚡ INNER JOIN</h2>
+                <p>注文のあるユーザーのみを取得</p>
+                <pre><code class="language-sql">SELECT
+    u.id,
+    u.name,
+    COUNT(o.id) as order_count,
+    SUM(o.total_amount) as total_spent
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+GROUP BY u.id
+LIMIT 10;</code></pre>
+                <div class="fragment">
+                    <p><strong>特徴:</strong> 最も効率的で高速</p>
+                    <p><strong>用途:</strong> 確実にデータが存在する関連を取得</p>
+                </div>
+            </section>
+
+            <!-- LEFT JOIN -->
+            <section>
+                <h2>⬅️ LEFT JOIN</h2>
+                <p>注文がないユーザーも含めて取得</p>
+                <pre><code class="language-sql">SELECT
+    u.id,
+    u.name,
+    COUNT(o.id) as order_count,
+    COALESCE(SUM(o.total_amount), 0) as total_spent
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.id
+HAVING order_count = 0  -- 注文なしユーザーのみ
+LIMIT 10;</code></pre>
+                <div class="fragment">
+                    <p><strong>特徴:</strong> NULL値を含む可能性</p>
+                    <p><strong>用途:</strong> マスターテーブル基準での一覧表示</p>
+                </div>
+            </section>
+
+            <!-- 複数テーブルJOIN -->
+            <section>
+                <h2>🔗 複数テーブルのJOIN</h2>
+                <pre><code class="language-sql">SELECT
+    u.name as user_name,
+    o.id as order_id,
+    o.ordered_at,
+    p.name as product_name,
+    oi.quantity,
+    oi.price
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+INNER JOIN order_items oi ON o.id = oi.order_id
+INNER JOIN products p ON oi.product_id = p.id
+WHERE o.ordered_at >= '2024-01-01'
+LIMIT 100;</code></pre>
+                <div class="fragment">
+                    <p><strong>ポイント:</strong> JOINの順序が性能に影響</p>
+                </div>
+            </section>
+
+            <!-- JOINのパフォーマンス -->
+            <section>
+                <h2>🚀 パフォーマンスを意識したJOIN</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ 悪い例</h3>
+                        <pre><code class="language-sql">-- 全テーブルをJOINしてからフィルタ
+SELECT COUNT(*)
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+INNER JOIN order_items oi ON o.id = oi.order_id
+INNER JOIN products p ON oi.product_id = p.id
+WHERE p.category_id = 5;</code></pre>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ 良い例</h3>
+                        <pre><code class="language-sql">-- 必要最小限のJOIN
+SELECT COUNT(*)
+FROM order_items oi
+INNER JOIN products p ON oi.product_id = p.id
+WHERE p.category_id = 5;</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- N+1問題 -->
+            <section>
+                <h2>⚠️ N+1問題</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ アンチパターン（N+1問題）</h3>
+                        <pre><code class="language-sql">-- アプリケーション側でループ処理
+SELECT * FROM users WHERE id = 1;
+SELECT * FROM orders WHERE user_id = 1;
+SELECT * FROM users WHERE id = 2;
+SELECT * FROM orders WHERE user_id = 2;
+-- ... 以下続く</code></pre>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ 解決策（一括取得）</h3>
+                        <pre><code class="language-sql">-- 1回のクエリで取得
+SELECT u.*, o.*
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+WHERE u.id IN (1, 2, 3, ...);</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 実践演習1 -->
+            <section>
+                <h2>💻 演習1: 売上TOP10商品</h2>
+                <pre><code class="language-sql">-- ステップ1: 売上TOP10商品を特定
+WITH top_products AS (
+    SELECT
+        p.id,
+        p.name,
+        SUM(oi.quantity * oi.price) as revenue
+    FROM products p
+    INNER JOIN order_items oi ON p.id = oi.product_id
+    GROUP BY p.id
+    ORDER BY revenue DESC
+    LIMIT 10
+)
+-- ステップ2: TOP10商品の購入者を取得
+SELECT DISTINCT
+    tp.name as product_name,
+    tp.revenue,
+    u.name as user_name,
+    u.email
+FROM top_products tp
+INNER JOIN order_items oi ON tp.id = oi.product_id
+INNER JOIN orders o ON oi.order_id = o.id
+INNER JOIN users u ON o.user_id = u.id
+ORDER BY tp.revenue DESC, u.name;</code></pre>
+            </section>
+
+            <!-- 実践演習2 -->
+            <section>
+                <h2>📊 演習2: 月次売上レポート</h2>
+                <pre><code class="language-sql">SELECT
+    DATE_FORMAT(o.ordered_at, '%Y-%m') as month,
+    COUNT(DISTINCT o.user_id) as unique_customers,
+    COUNT(o.id) as total_orders,
+    SUM(o.total_amount) as total_revenue,
+    AVG(o.total_amount) as avg_order_value
+FROM orders o
+WHERE o.status = 'completed'
+    AND o.ordered_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+GROUP BY month
+ORDER BY month DESC;</code></pre>
+                <div class="fragment">
+                    <p><strong>ポイント:</strong> 集計関数とGROUP BYの組み合わせ</p>
+                </div>
+            </section>
+
+            <!-- JOINの最適化ガイドライン -->
+            <section>
+                <h2>📋 JOINの最適化ガイドライン</h2>
+                <ol>
+                    <li class="fragment"><strong>必要最小限のJOIN</strong>: 不要なテーブル結合を避ける</li>
+                    <li class="fragment"><strong>適切な結合条件</strong>: インデックスが効くカラムを使用</li>
+                    <li class="fragment"><strong>WHERE句の配置</strong>: フィルタは早い段階で適用</li>
+                    <li class="fragment"><strong>結合順序の考慮</strong>: 小さなテーブルから大きなテーブルへ</li>
+                    <li class="fragment"><strong>データ型の一致</strong>: 結合条件のデータ型を揃える</li>
+                </ol>
+            </section>
+
+            <!-- 確認課題 -->
+            <section>
+                <h2>✅ 確認課題</h2>
+                <ol>
+                    <li class="fragment">過去30日間で最も売れた商品TOP5を、カテゴリー名付きで取得</li>
+                    <li class="fragment">一度も注文していないユーザー数をカウント</li>
+                    <li class="fragment">各カテゴリーの売上合計を降順で表示</li>
+                </ol>
+                <div class="fragment">
+                    <p><strong>💡 ヒント:</strong> LEFT JOINとWHERE句の組み合わせを活用</p>
+                </div>
+            </section>
+
+            <!-- まとめ -->
+            <section>
+                <h2>📝 Day 1 まとめ</h2>
+                <ul>
+                    <li class="fragment">INNER JOINは最も効率的</li>
+                    <li class="fragment">LEFT JOINはマスターデータ基準で使用</li>
+                    <li class="fragment">複数テーブルJOINは順序に注意</li>
+                    <li class="fragment">N+1問題は一括取得で解決</li>
+                    <li class="fragment">不要なJOINは避ける</li>
+                </ul>
+                <div class="fragment">
+                    <p><strong>次はインデックスの基本を学習しましょう!</strong></p>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section data-background-gradient="linear-gradient(to bottom, #17b2c3, #283b95)">
+                <h2>🎯 Next: インデックスの基本</h2>
+                <p class="fragment">JOINのパフォーマンスを支えるインデックスを理解しよう</p>
+                <div class="fragment">
+                    <a href="day2.html" class="cta-button">Day 2: インデックスの基本へ →</a>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="day0.html">← Day 0</a>
+                    <a href="index.html">目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>

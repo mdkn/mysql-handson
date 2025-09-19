@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 5: インデックス設計の実践 - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 5</h1>
+                <h2>インデックス設計の実践</h2>
+                <p>実際のクエリパターンに基づいて最適なインデックスを設計</p>
+                <nav class="slide-nav">
+                    <a href="day4.html">← Day 4</a>
+                    <a href="index.html">目次</a>
+                    <a href="day6.html">Day 6 →</a>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">実際のクエリパターンに基づいてインデックスを設計できる</li>
+                    <li class="fragment">インデックスの効果を定量的に評価できる</li>
+                    <li class="fragment">インデックスのトレードオフを理解する</li>
+                    <li class="fragment">カバリングインデックスを効果的に活用できる</li>
+                </ul>
+            </section>
+
+            <!-- インデックス戦略の立案 -->
+            <section>
+                <h2>🎯 インデックス戦略の立案</h2>
+                <div class="fragment">
+                    <h3>ステップ1: クエリパターンの分析</h3>
+                    <p>アプリケーションで頻繁に使用されるクエリを収集</p>
+                </div>
+                <div class="fragment">
+                    <h3>ECサイトの主要機能例</h3>
+                    <ul>
+                        <li>商品検索 (カテゴリ、価格範囲、在庫)</li>
+                        <li>ユーザーの注文履歴</li>
+                        <li>売上集計レポート</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 商品検索のクエリパターン -->
+            <section>
+                <h2>🔍 商品検索のクエリパターン</h2>
+                <pre><code class="language-sql">-- 1. 商品検索
+SELECT * FROM products
+WHERE category_id = ?
+  AND price BETWEEN ? AND ?
+  AND stock_quantity > 0
+ORDER BY created_at DESC;</code></pre>
+                <div class="fragment">
+                    <h3>最適なインデックス設計</h3>
+                    <pre><code class="language-sql">-- カーディナリティと使用頻度を考慮
+CREATE INDEX idx_products_search
+ON products(category_id, stock_quantity, price, created_at);</code></pre>
+                </div>
+            </section>
+
+            <!-- 注文履歴のクエリパターン -->
+            <section>
+                <h2>📋 注文履歴のクエリパターン</h2>
+                <pre><code class="language-sql">-- 2. ユーザーの注文履歴
+SELECT * FROM orders
+WHERE user_id = ?
+  AND status IN ('completed', 'processing')
+ORDER BY ordered_at DESC
+LIMIT 20;</code></pre>
+                <div class="fragment">
+                    <h3>最適なインデックス設計</h3>
+                    <pre><code class="language-sql">-- ソート順も考慮したインデックス
+CREATE INDEX idx_orders_user_history
+ON orders(user_id, status, ordered_at DESC);</code></pre>
+                </div>
+            </section>
+
+            <!-- 売上集計のクエリパターン -->
+            <section>
+                <h2>📊 売上集計のクエリパターン</h2>
+                <pre><code class="language-sql">-- 3. 売上集計
+SELECT
+    DATE(ordered_at) as date,
+    COUNT(*) as order_count,
+    SUM(total_amount) as revenue
+FROM orders
+WHERE ordered_at BETWEEN ? AND ?
+  AND status = 'completed'
+GROUP BY DATE(ordered_at);</code></pre>
+                <div class="fragment">
+                    <h3>最適なインデックス設計</h3>
+                    <pre><code class="language-sql">-- 集計に必要な全カラムを含む
+CREATE INDEX idx_orders_reporting
+ON orders(status, ordered_at, total_amount);</code></pre>
+                </div>
+            </section>
+
+            <!-- カーディナリティの重要性 -->
+            <section>
+                <h2>🎲 カーディナリティの重要性</h2>
+                <pre><code class="language-sql">-- カーディナリティ（選択性）の確認
+SELECT
+    'status' as column_name,
+    COUNT(DISTINCT status) as distinct_values,
+    COUNT(*) as total_rows,
+    COUNT(DISTINCT status) / COUNT(*) * 100 as selectivity_percent
+FROM orders
+UNION ALL
+SELECT
+    'user_id',
+    COUNT(DISTINCT user_id),
+    COUNT(*),
+    COUNT(DISTINCT user_id) / COUNT(*) * 100
+FROM orders;</code></pre>
+                <div class="fragment">
+                    <p><strong>原則:</strong> 選択性が高い（一意な値が多い）カラムを先頭に配置</p>
+                </div>
+            </section>
+
+            <!-- 最適な順序の決定 -->
+            <section>
+                <h2>📏 インデックスの最適な順序</h2>
+                <div class="comparison">
+                    <div class="bad-example fragment">
+                        <h3>❌ 悪い例</h3>
+                        <pre><code class="language-sql">-- 選択性の低いカラムが先頭
+CREATE INDEX idx_orders_bad
+ON orders(status, user_id, ordered_at);</code></pre>
+                        <p>status（4種類）が先頭で効果が低い</p>
+                    </div>
+                    <div class="good-example fragment">
+                        <h3>✅ 良い例</h3>
+                        <pre><code class="language-sql">-- 選択性の高いカラムが先頭
+CREATE INDEX idx_orders_optimized
+ON orders(user_id, ordered_at, status);</code></pre>
+                        <p>user_id（100万種類）が先頭で効率的</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- カバリングインデックス -->
+            <section>
+                <h2>🛡️ カバリングインデックスの設計</h2>
+                <div class="fragment">
+                    <h3>頻繁に実行される参照クエリ</h3>
+                    <pre><code class="language-sql">SELECT user_id, status, total_amount
+FROM orders
+WHERE user_id = 12345
+  AND status = 'completed';</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>カバリングインデックス</h3>
+                    <pre><code class="language-sql">-- クエリに必要な全カラムを含む
+CREATE INDEX idx_orders_covering
+ON orders(user_id, status, total_amount);</code></pre>
+                </div>
+                <div class="fragment">
+                    <pre><code class="language-sql">-- 効果確認
+EXPLAIN SELECT user_id, status, total_amount
+FROM orders
+WHERE user_id = 12345
+  AND status = 'completed';
+-- Extra: Using index （テーブルアクセス不要）</code></pre>
+                </div>
+            </section>
+
+            <!-- インデックスのコスト測定 -->
+            <section>
+                <h2>💰 インデックスのコスト測定</h2>
+                <h3>書き込みパフォーマンスへの影響</h3>
+                <pre><code class="language-sql">-- インデックスなしでの挿入時間測定
+SET @start = NOW(6);
+INSERT INTO orders (user_id, total_amount, status)
+SELECT
+    FLOOR(1 + RAND() * 1000000),
+    ROUND(RAND() * 10000, 2),
+    ELT(FLOOR(1 + RAND() * 3), 'pending', 'completed', 'cancelled')
+FROM orders
+LIMIT 10000;
+SET @end = NOW(6);
+SELECT TIMEDIFF(@end, @start) as insert_time;</code></pre>
+                <div class="fragment">
+                    <p><strong>💡 ポイント:</strong> インデックス追加後も同じ測定を行い比較</p>
+                </div>
+            </section>
+
+            <!-- 未使用インデックスの特定 -->
+            <section>
+                <h2>🔍 未使用インデックスの特定</h2>
+                <pre><code class="language-sql">-- インデックスの使用統計
+SELECT
+    object_schema,
+    object_name,
+    index_name,
+    count_read,
+    count_write,
+    count_fetch,
+    count_insert,
+    count_update,
+    count_delete
+FROM performance_schema.table_io_waits_summary_by_index_usage
+WHERE object_schema = 'training_db'
+  AND index_name IS NOT NULL
+  AND count_read = 0  -- 読み取りされていないインデックス
+ORDER BY object_name, index_name;</code></pre>
+                <div class="fragment">
+                    <p><strong>判断基準:</strong> count_read = 0 のインデックスは削除を検討</p>
+                </div>
+            </section>
+
+            <!-- インデックスの断片化確認 -->
+            <section>
+                <h2>🧩 インデックスの断片化確認</h2>
+                <pre><code class="language-sql">-- 統計情報の更新
+ANALYZE TABLE orders;
+ANALYZE TABLE order_items;
+
+-- 断片化の確認（InnoDBの場合）
+SELECT
+    table_name,
+    data_length / 1024 / 1024 as data_size_mb,
+    index_length / 1024 / 1024 as index_size_mb,
+    data_free / 1024 / 1024 as free_space_mb,
+    (data_free / (data_length + index_length)) * 100 as fragmentation_percent
+FROM information_schema.tables
+WHERE table_schema = 'training_db'
+  AND engine = 'InnoDB'
+ORDER BY fragmentation_percent DESC;</code></pre>
+                <div class="fragment">
+                    <p><strong>対処法:</strong> 断片化率が20%以上の場合は再構築を検討</p>
+                </div>
+            </section>
+
+            <!-- 実践演習1: 複合条件の最適化 -->
+            <section>
+                <h2>💻 演習1: 複合条件の最適化</h2>
+                <pre><code class="language-sql">-- 以下のクエリ群に最適なインデックスを設計
+
+-- Query A: カテゴリ別の在庫あり商品
+SELECT * FROM products
+WHERE category_id = 5 AND stock_quantity > 0;
+
+-- Query B: 価格範囲検索
+SELECT * FROM products
+WHERE price BETWEEN 1000 AND 5000;
+
+-- Query C: カテゴリ＋価格範囲＋在庫
+SELECT * FROM products
+WHERE category_id = 5
+  AND price BETWEEN 1000 AND 5000
+  AND stock_quantity > 0;</code></pre>
+                <div class="fragment">
+                    <h3>解答例</h3>
+                    <pre><code class="language-sql">-- 複合インデックスで全てカバー
+CREATE INDEX idx_products_composite
+ON products(category_id, stock_quantity, price);
+
+-- Query B用に追加
+CREATE INDEX idx_products_price ON products(price);</code></pre>
+                </div>
+            </section>
+
+            <!-- 実践演習2: JOINの最適化 -->
+            <section>
+                <h2>💻 演習2: JOINクエリの最適化</h2>
+                <pre><code class="language-sql">-- 以下のJOINクエリを最適化
+SELECT
+    u.name,
+    u.email,
+    o.id as order_id,
+    o.total_amount,
+    oi.quantity,
+    p.name as product_name
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+INNER JOIN order_items oi ON o.id = oi.order_id
+INNER JOIN products p ON oi.product_id = p.id
+WHERE u.created_at >= '2024-01-01'
+  AND o.status = 'completed'
+  AND p.category_id = 10;</code></pre>
+                <div class="fragment">
+                    <h3>解答例</h3>
+                    <pre><code class="language-sql">CREATE INDEX idx_users_created ON users(created_at);
+CREATE INDEX idx_orders_join ON orders(user_id, status);
+CREATE INDEX idx_orderitems_join ON order_items(order_id, product_id);
+CREATE INDEX idx_products_category ON products(category_id);</code></pre>
+                </div>
+            </section>
+
+            <!-- インデックス設計のベストプラクティス -->
+            <section>
+                <h2>🏆 インデックス設計のベストプラクティス</h2>
+                <ul>
+                    <li class="fragment"><strong>WHERE句の頻度順:</strong> よく使われる条件を先頭に</li>
+                    <li class="fragment"><strong>等価条件優先:</strong> = 条件を範囲条件より前に</li>
+                    <li class="fragment"><strong>ソート考慮:</strong> ORDER BYがある場合は順序も含める</li>
+                    <li class="fragment"><strong>カバリング検討:</strong> SELECT句のカラムも含められるか</li>
+                    <li class="fragment"><strong>書き込み影響:</strong> 更新頻度とのバランスを考慮</li>
+                </ul>
+            </section>
+
+            <!-- インデックス効果の測定方法 -->
+            <section>
+                <h2>📊 インデックス効果の測定</h2>
+                <div class="fragment">
+                    <h3>1. 実行時間の比較</h3>
+                    <pre><code class="language-sql">SET profiling = 1;
+-- インデックス追加前のクエリ実行
+[クエリ]
+-- インデックス追加
+CREATE INDEX ...
+-- インデックス追加後のクエリ実行
+[同じクエリ]
+SHOW PROFILES;</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>2. 実行計画の比較</h3>
+                    <pre><code class="language-sql">-- インデックス追加前後でEXPLAIN実行
+EXPLAIN [クエリ];
+-- rows, type, Extra の変化を確認</code></pre>
+                </div>
+            </section>
+
+            <!-- インデックスメンテナンス -->
+            <section>
+                <h2>🔧 インデックスメンテナンス</h2>
+                <div class="fragment">
+                    <h3>定期的なメンテナンス</h3>
+                    <ul>
+                        <li>統計情報の更新（ANALYZE TABLE）</li>
+                        <li>未使用インデックスの確認・削除</li>
+                        <li>断片化の確認・対処</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <h3>自動メンテナンス設定</h3>
+                    <pre><code class="language-sql">-- 自動統計更新（MySQL 8.0）
+SET GLOBAL innodb_stats_auto_recalc = 1;
+SET GLOBAL innodb_stats_persistent = 1;
+
+-- 統計情報サンプリング
+SET GLOBAL innodb_stats_persistent_sample_pages = 20;</code></pre>
+                </div>
+            </section>
+
+            <!-- 確認課題 -->
+            <section>
+                <h2>✅ 確認課題</h2>
+                <ol>
+                    <li class="fragment">自社の主要なクエリパターンを5つ特定してください</li>
+                    <li class="fragment">各クエリに最適なインデックスを設計してください</li>
+                    <li class="fragment">インデックス追加前後でパフォーマンスを比較してください</li>
+                    <li class="fragment">未使用インデックスがないか確認してください</li>
+                </ol>
+                <div class="fragment">
+                    <p><strong>💡 ヒント:</strong> スロークエリログから頻出パターンを抽出</p>
+                </div>
+            </section>
+
+            <!-- 注意点とトレードオフ -->
+            <section>
+                <h2>⚠️ 注意点とトレードオフ</h2>
+                <div class="tradeoffs">
+                    <div class="fragment">
+                        <h3>インデックスの利点</h3>
+                        <ul>
+                            <li>検索速度の大幅向上</li>
+                            <li>ソート処理の高速化</li>
+                            <li>JOINの効率化</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>インデックスの欠点</h3>
+                        <ul>
+                            <li>書き込み処理の遅延</li>
+                            <li>ストレージ容量の増加</li>
+                            <li>メンテナンスオーバーヘッド</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="fragment">
+                    <p><strong>💡 バランス:</strong> 読み取り：書き込み = 9：1 の場合はインデックス有効</p>
+                </div>
+            </section>
+
+            <!-- まとめ -->
+            <section>
+                <h2>📝 Day 5 まとめ</h2>
+                <ul>
+                    <li class="fragment">クエリパターン分析がインデックス設計の出発点</li>
+                    <li class="fragment">カーディナリティの高いカラムを先頭に配置</li>
+                    <li class="fragment">カバリングインデックスで最大限の効果を</li>
+                    <li class="fragment">未使用インデックスは定期的に見直し</li>
+                    <li class="fragment">書き込み性能とのトレードオフを考慮</li>
+                </ul>
+                <div class="fragment">
+                    <p><strong>次はクエリ最適化のパターンを学習しましょう!</strong></p>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section data-background-gradient="linear-gradient(to bottom, #17b2c3, #283b95)">
+                <h2>🎯 Next: クエリ最適化のパターン</h2>
+                <p class="fragment">実践的なクエリ最適化テクニックを習得しよう</p>
+                <div class="fragment">
+                    <a href="day6.html" class="cta-button">Day 6: クエリ最適化のパターンへ →</a>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="day4.html">← Day 4</a>
+                    <a href="index.html">目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>

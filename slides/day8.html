@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 8: ケーススタディと知識共有 - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 8</h1>
+                <h2>ケーススタディと知識共有</h2>
+                <p>実際の障害事例から学び、継続的な改善プロセスを構築</p>
+                <nav class="slide-nav">
+                    <a href="day7.html">← Day 7</a>
+                    <a href="index.html">目次</a>
+                    <span class="final-day">最終日</span>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">実際の障害事例から学ぶ</li>
+                    <li class="fragment">チューニングのベストプラクティスを共有</li>
+                    <li class="fragment">継続的な改善プロセスを構築</li>
+                    <li class="fragment">チーム全体でのナレッジ共有体制を作る</li>
+                </ul>
+            </section>
+
+            <!-- 実際の障害事例1 -->
+            <section>
+                <h2>🚨 ケース1: 突然のレスポンス悪化</h2>
+                <div class="case-study">
+                    <div class="fragment">
+                        <h3>症状</h3>
+                        <p>朝9時になると急激にレスポンスが遅くなる</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>原因調査</h3>
+                        <pre><code class="language-sql">-- 1. スロークエリの時間別分析
+SELECT
+    DATE_FORMAT(start_time, '%H:00') as hour,
+    COUNT(*) as slow_queries,
+    AVG(query_time) as avg_time
+FROM mysql.slow_log
+WHERE DATE(start_time) = CURDATE()
+GROUP BY hour
+ORDER BY hour;</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ケース1の解決過程 -->
+            <section>
+                <h2>🔍 ケース1: 原因特定と解決</h2>
+                <div class="fragment">
+                    <h3>2. 該当時間のクエリ特定</h3>
+                    <pre><code class="language-sql">SELECT
+    sql_text,
+    COUNT(*) as exec_count,
+    AVG(query_time) as avg_time
+FROM mysql.slow_log
+WHERE DATE_FORMAT(start_time, '%H') = '09'
+GROUP BY sql_text
+ORDER BY exec_count * avg_time DESC;</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>判明した原因</h3>
+                    <ul>
+                        <li><strong>根本原因:</strong> 毎日9時のバッチ処理との競合</li>
+                        <li><strong>影響:</strong> 大量のINSERT処理がオンライン処理をブロック</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <h3>解決策</h3>
+                    <ol>
+                        <li>バッチ処理の時間変更（深夜時間帯へ）</li>
+                        <li>リードレプリカへの参照処理分散</li>
+                        <li>インデックス追加で個別クエリ高速化</li>
+                    </ol>
+                </div>
+            </section>
+
+            <!-- 実際の障害事例2 -->
+            <section>
+                <h2>🔒 ケース2: テーブルロックによる詰まり</h2>
+                <div class="case-study">
+                    <div class="fragment">
+                        <h3>症状</h3>
+                        <p>特定の処理で全体のシステムが応答しなくなる</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>調査方法</h3>
+                        <pre><code class="language-sql">-- 1. 現在のロック状況確認
+SHOW PROCESSLIST;
+
+-- 2. InnoDBのロック情報
+SELECT * FROM information_schema.innodb_locks;
+SELECT * FROM information_schema.innodb_lock_waits;
+
+-- 3. デッドロックの履歴
+SHOW ENGINE INNODB STATUS\G</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ケース2の解決 -->
+            <section>
+                <h2>🔧 ケース2: 解決策とベストプラクティス</h2>
+                <div class="fragment">
+                    <h3>原因</h3>
+                    <ul>
+                        <li>長時間トランザクションによるロック保持</li>
+                        <li>SELECT ... FOR UPDATE の不適切な使用</li>
+                        <li>大量データの一括更新</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <h3>解決策</h3>
+                    <pre><code class="language-sql">-- 1. トランザクションの細分化
+START TRANSACTION;
+UPDATE orders SET status = 'processed' WHERE id BETWEEN 1 AND 1000;
+COMMIT;
+
+START TRANSACTION;
+UPDATE orders SET status = 'processed' WHERE id BETWEEN 1001 AND 2000;
+COMMIT;
+
+-- 2. 適切なアイソレーションレベル設定
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>予防策</h3>
+                    <ul>
+                        <li>トランザクション時間の監視（5秒以上で警告）</li>
+                        <li>バッチ処理のサイズ制限</li>
+                        <li>定期的なデッドロック分析</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- ベストプラクティス -->
+            <section>
+                <h2>🏆 チューニングのベストプラクティス</h2>
+                <div class="best-practices">
+                    <div class="fragment">
+                        <h3>1. 定期メンテナンス</h3>
+                        <pre><code class="language-sql">-- 統計情報の更新
+ANALYZE TABLE users, products, orders, order_items;
+
+-- インデックスの再構築（断片化解消）
+ALTER TABLE orders ENGINE=InnoDB;
+
+-- 古いデータのアーカイブ
+CREATE TABLE orders_archive LIKE orders;
+INSERT INTO orders_archive
+SELECT * FROM orders
+WHERE ordered_at < DATE_SUB(NOW(), INTERVAL 2 YEAR);</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 監視設定 -->
+            <section>
+                <h2>📊 継続的監視の設定</h2>
+                <div class="fragment">
+                    <h3>重要メトリクスの監視</h3>
+                    <pre><code class="language-sql">CREATE VIEW monitoring_metrics AS
+SELECT
+    'Slow Queries (1h)' as metric,
+    COUNT(*) as value
+FROM mysql.slow_log
+WHERE start_time > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+UNION ALL
+SELECT
+    'Avg Query Time (1h)',
+    AVG(query_time)
+FROM mysql.slow_log
+WHERE start_time > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+UNION ALL
+SELECT
+    'Buffer Pool Hit Rate',
+    (1 - (Innodb_buffer_pool_reads / Innodb_buffer_pool_read_requests)) * 100
+FROM (
+    SELECT
+        MAX(CASE WHEN variable_name = 'Innodb_buffer_pool_reads'
+            THEN variable_value END) as Innodb_buffer_pool_reads,
+        MAX(CASE WHEN variable_name = 'Innodb_buffer_pool_read_requests'
+            THEN variable_value END) as Innodb_buffer_pool_read_requests
+    FROM information_schema.global_status
+) as t;</code></pre>
+                </div>
+            </section>
+
+            <!-- チェックリスト -->
+            <section>
+                <h2>📋 日次チェックリスト</h2>
+                <div class="checklist">
+                    <div class="fragment">
+                        <h3>1. スロークエリの確認</h3>
+                        <ul>
+                            <li>☐ 過去24時間のスロークエリ数確認</li>
+                            <li>☐ 新規に発生した遅いクエリの特定</li>
+                            <li>☐ TOP5の重いクエリの改善検討</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>2. システムリソース</h3>
+                        <ul>
+                            <li>☐ CPU使用率の確認（閾値：70%）</li>
+                            <li>☐ メモリ使用率の確認（閾値：80%）</li>
+                            <li>☐ ディスクI/Oの確認</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>3. インデックス効率</h3>
+                        <ul>
+                            <li>☐ 未使用インデックスの確認</li>
+                            <li>☐ フルテーブルスキャンの発生確認</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- トラブルシューティングガイド -->
+            <section>
+                <h2>🔧 トラブルシューティングガイド</h2>
+                <div class="troubleshooting-guide">
+                    <div class="fragment">
+                        <h3>クエリが遅い時の対処法</h3>
+                        <ol>
+                            <li><strong>原因特定</strong>
+                                <ul>
+                                    <li>EXPLAIN実行</li>
+                                    <li>スロークエリログ確認</li>
+                                    <li>プロファイリング実行</li>
+                                </ul>
+                            </li>
+                            <li><strong>一般的な解決策</strong>
+                                <ul>
+                                    <li>インデックス追加</li>
+                                    <li>クエリ書き換え</li>
+                                    <li>データ量削減（アーカイブ）</li>
+                                    <li>キャッシュ活用</li>
+                                </ul>
+                            </li>
+                        </ol>
+                    </div>
+                    <div class="fragment">
+                        <h3>エスカレーション基準</h3>
+                        <ul>
+                            <li>5秒以上かかるクエリ</li>
+                            <li>CPU使用率90%以上が継続</li>
+                            <li>ユーザーからのクレーム発生</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 継続的改善プロセス -->
+            <section>
+                <h2>🔄 継続的改善プロセス</h2>
+                <div class="improvement-process">
+                    <div class="fragment">
+                        <h3>週次レビュー会のアジェンダ</h3>
+                        <ol>
+                            <li><strong>先週のパフォーマンス総括</strong></li>
+                            <li><strong>改善効果の測定</strong></li>
+                            <li><strong>新規課題の共有</strong></li>
+                            <li><strong>次週のアクションアイテム</strong></li>
+                        </ol>
+                    </div>
+                    <div class="fragment">
+                        <h3>改善サイクル</h3>
+                        <pre><code class="language-sql">-- 週次パフォーマンス分析
+SELECT
+    DATE(start_time) as date,
+    COUNT(*) as slow_queries,
+    AVG(query_time) as avg_time,
+    MAX(query_time) as max_time
+FROM mysql.slow_log
+WHERE start_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+GROUP BY DATE(start_time)
+ORDER BY date DESC;</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ナレッジベース構築 -->
+            <section>
+                <h2>📚 社内ナレッジベース構築</h2>
+                <div class="fragment">
+                    <h3>チューニング履歴テーブル</h3>
+                    <pre><code class="language-sql">CREATE TABLE tuning_history (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    problem_description TEXT,
+    root_cause TEXT,
+    solution TEXT,
+    before_performance VARCHAR(100),
+    after_performance VARCHAR(100),
+    implemented_date DATE,
+    implemented_by VARCHAR(100),
+    tags VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 事例の記録
+INSERT INTO tuning_history
+(problem_description, root_cause, solution, before_performance, after_performance, implemented_date, implemented_by, tags)
+VALUES
+('月次レポートが30秒以上かかる',
+ '相関サブクエリとインデックス不足',
+ 'CTEへの書き換えと複合インデックス追加',
+ '35秒',
+ '2秒',
+ '2024-01-20',
+ 'エンジニアA',
+ 'report,subquery,index');</code></pre>
+                </div>
+            </section>
+
+            <!-- 学習リソース -->
+            <section>
+                <h2>📖 学習リソースとコミュニティ</h2>
+                <div class="learning-resources">
+                    <div class="fragment">
+                        <h3>推奨書籍・資料</h3>
+                        <ul>
+                            <li>MySQL公式ドキュメント</li>
+                            <li>High Performance MySQL</li>
+                            <li>パフォーマンスチューニングのブログ記事</li>
+                            <li>MySQL Conference & Expo の資料</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>継続学習のススメ</h3>
+                        <ul>
+                            <li>MySQL の新機能追跡</li>
+                            <li>定期的な勉強会参加</li>
+                            <li>他社事例の共有</li>
+                            <li>OSS貢献による深い理解</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 実務適用プラン -->
+            <section>
+                <h2>🚀 実務適用プラン作成</h2>
+                <div class="implementation-plan">
+                    <div class="fragment">
+                        <h3>自社システムへの適用計画</h3>
+                        <ol>
+                            <li><strong>現状分析（1週間）</strong>
+                                <ul>
+                                    <li>スロークエリTOP20の特定</li>
+                                    <li>主要テーブルのインデックス調査</li>
+                                    <li>ピーク時のパフォーマンス測定</li>
+                                </ul>
+                            </li>
+                            <li><strong>改善計画（2週間）</strong>
+                                <ul>
+                                    <li>優先度順の改善リスト作成</li>
+                                    <li>各改善の想定効果算出</li>
+                                    <li>リスク評価とロールバックプラン</li>
+                                </ul>
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 実装とテスト -->
+            <section>
+                <h2>🧪 実装とテスト</h2>
+                <div class="fragment">
+                    <h3>3. 実装とテスト（3週間）</h3>
+                    <ul>
+                        <li>開発環境での改善実施</li>
+                        <li>パフォーマンステスト</li>
+                        <li>本番適用と効果測定</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <h3>4. 定着化（継続）</h3>
+                    <ul>
+                        <li>監視体制の構築</li>
+                        <li>定期レビューの実施</li>
+                        <li>ナレッジの蓄積と共有</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <h3>成功の指標</h3>
+                    <ul>
+                        <li>平均レスポンス時間の50%改善</li>
+                        <li>スロークエリ数の70%削減</li>
+                        <li>ユーザー満足度の向上</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- よく使うコマンドリファレンス -->
+            <section>
+                <h2>📝 よく使うコマンドリファレンス</h2>
+                <div class="command-reference">
+                    <div class="fragment">
+                        <h3>システム変数の確認</h3>
+                        <pre><code class="language-sql">-- 重要な設定値
+SHOW VARIABLES LIKE 'innodb_buffer_pool_size';
+SHOW VARIABLES LIKE 'max_connections';
+SHOW VARIABLES LIKE 'slow_query%';</code></pre>
+                    </div>
+                    <div class="fragment">
+                        <h3>ステータス確認</h3>
+                        <pre><code class="language-sql">-- 実行統計
+SHOW GLOBAL STATUS LIKE 'Threads_connected';
+SHOW GLOBAL STATUS LIKE 'Questions';
+SHOW GLOBAL STATUS LIKE 'Slow_queries';</code></pre>
+                    </div>
+                    <div class="fragment">
+                        <h3>プロセス管理</h3>
+                        <pre><code class="language-sql">-- 実行中のクエリ確認
+SHOW FULL PROCESSLIST;
+
+-- 特定のクエリを強制終了
+KILL [process_id];</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 研修の振り返り -->
+            <section>
+                <h2>🎓 研修の振り返り</h2>
+                <div class="course-review">
+                    <div class="fragment">
+                        <h3>習得したスキル</h3>
+                        <ul>
+                            <li><strong>分析力:</strong> EXPLAINとスロークエリログでボトルネック特定</li>
+                            <li><strong>設計力:</strong> 適切なインデックス設計</li>
+                            <li><strong>実装力:</strong> クエリ最適化の各種テクニック</li>
+                            <li><strong>運用力:</strong> 継続的な監視と改善</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>学習の軌跡</h3>
+                        <ul>
+                            <li>Day 0-1: 基礎とJOIN</li>
+                            <li>Day 2-3: インデックスとEXPLAIN</li>
+                            <li>Day 4-5: 監視と実践的設計</li>
+                            <li>Day 6-7: 最適化パターンと総合演習</li>
+                            <li>Day 8: 実践への適用</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section>
+                <h2>🚀 次のステップ</h2>
+                <div class="next-steps">
+                    <div class="fragment">
+                        <h3>immediate（即座に）</h3>
+                        <ul>
+                            <li>自社システムの現状分析開始</li>
+                            <li>優先度の高いクエリ1つの改善実践</li>
+                            <li>チームメンバーとの知識共有</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>中長期（3ヶ月以内）</h3>
+                        <ul>
+                            <li>監視体制の構築</li>
+                            <li>定期的なパフォーマンスレビュー</li>
+                            <li>より高度な技術の習得（パーティショニング、レプリケーション）</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>継続的学習</h3>
+                        <ul>
+                            <li>NoSQLなど他のデータベース技術</li>
+                            <li>アプリケーションレベルの最適化</li>
+                            <li>クラウドデータベースサービス</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 最後のメッセージ -->
+            <section>
+                <h2>💬 最後に</h2>
+                <div class="final-message">
+                    <div class="fragment">
+                        <p class="large-text">クエリチューニングは<br><strong>継続的な取り組み</strong>です</p>
+                    </div>
+                    <div class="fragment">
+                        <ul>
+                            <li>日々の監視と改善を通じてシステムのパフォーマンスを維持・向上</li>
+                            <li>困ったときは、この資料に立ち返る</li>
+                            <li>先輩エンジニアや同僚と相談しながら解決</li>
+                            <li>学んだ知識を後輩に伝える</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <p class="highlight">継続は力なり。<br>一歩ずつ着実にスキルアップしていきましょう！</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 修了証書 -->
+            <section data-background-gradient="linear-gradient(45deg, #f39c12, #e74c3c, #9b59b6, #3498db)">
+                <div class="certificate">
+                    <h1>🎓 研修修了</h1>
+                    <h2>MySQL クエリチューニング研修</h2>
+                    <div class="fragment">
+                        <p>全8日間の研修を完了し、<br>実践的なクエリチューニングスキルを習得しました</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>🌟 おめでとうございます！🌟</h3>
+                    </div>
+                    <div class="fragment">
+                        <p class="small-text">これからも継続的な学習と改善を続けて、<br>さらなるスキルアップを目指してください</p>
+                    </div>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="day7.html">← Day 7</a>
+                    <a href="index.html">目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>

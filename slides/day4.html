@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 4: スロークエリログの活用 - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 4</h1>
+                <h2>スロークエリログの活用</h2>
+                <p>問題のクエリを特定し、定期的な監視体制を構築</p>
+                <nav class="slide-nav">
+                    <a href="day3.html">← Day 3</a>
+                    <a href="index.html">目次</a>
+                    <a href="day5.html">Day 5 →</a>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">スロークエリログの設定と確認ができる</li>
+                    <li class="fragment">ログから問題のあるクエリを特定できる</li>
+                    <li class="fragment">定期的な監視体制を構築できる</li>
+                    <li class="fragment">ログ分析ツールを効果的に使える</li>
+                </ul>
+            </section>
+
+            <!-- スロークエリログとは -->
+            <section>
+                <h2>📊 スロークエリログとは</h2>
+                <div class="fragment">
+                    <p><strong>定義:</strong> 指定した実行時間を超えるクエリを記録するログ</p>
+                </div>
+                <ul>
+                    <li class="fragment"><strong>目的:</strong> パフォーマンス問題の早期発見</li>
+                    <li class="fragment"><strong>利点:</strong> 本番環境での実際の問題を把握</li>
+                    <li class="fragment"><strong>重要性:</strong> 継続的な改善の基盤</li>
+                </ul>
+            </section>
+
+            <!-- スロークエリログの設定 -->
+            <section>
+                <h2>⚙️ スロークエリログの設定</h2>
+                <h3>動的設定（即座に有効）</h3>
+                <pre><code class="language-sql">-- 現在の設定確認
+SHOW VARIABLES LIKE 'slow_query%';
+SHOW VARIABLES LIKE 'long_query_time';
+
+-- スロークエリログを有効化
+SET GLOBAL slow_query_log = 1;
+SET GLOBAL slow_query_log_file = '/var/log/mysql/slow.log';
+SET GLOBAL long_query_time = 1;  -- 1秒以上のクエリを記録
+
+-- インデックスを使わないクエリも記録
+SET GLOBAL log_queries_not_using_indexes = 1;</code></pre>
+            </section>
+
+            <!-- 永続的な設定 -->
+            <section>
+                <h2>🔧 永続的な設定（my.cnf）</h2>
+                <pre><code class="language-ini">[mysqld]
+# スロークエリログ設定
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 1
+
+# インデックス未使用クエリも記録
+log_queries_not_using_indexes = 1
+
+# 管理コマンドのログ記録
+log_slow_admin_statements = 1
+
+# レプリケーション時のスロークエリ記録
+log_slow_replica_statements = 1</code></pre>
+                <div class="fragment">
+                    <p><strong>注意:</strong> 設定変更後はMySQLの再起動が必要</p>
+                </div>
+            </section>
+
+            <!-- スロークエリの発生と確認 -->
+            <section>
+                <h2>🔍 スロークエリの確認</h2>
+                <h3>テスト用の遅いクエリ</h3>
+                <pre><code class="language-sql">-- インデックスのないカラムで大量データを検索
+SELECT * FROM orders
+WHERE total_amount BETWEEN 10000 AND 20000
+ORDER BY ordered_at DESC;
+
+-- 非効率なJOIN
+SELECT
+    u.name,
+    COUNT(DISTINCT o.id) as orders,
+    COUNT(DISTINCT oi.id) as items
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+LEFT JOIN order_items oi ON o.id = oi.order_id
+GROUP BY u.id;</code></pre>
+            </section>
+
+            <!-- ログの確認方法 -->
+            <section>
+                <h2>📄 ログの確認方法</h2>
+                <pre><code class="language-bash"># Dockerコンテナ内でログ確認
+docker exec -it mysql-training tail -f /var/log/mysql/slow.log
+
+# またはホストから
+docker exec -it mysql-training cat /var/log/mysql/slow.log
+
+# リアルタイム監視
+docker exec -it mysql-training tail -f /var/log/mysql/slow.log | grep "Query_time"</code></pre>
+            </section>
+
+            <!-- ログの読み方 -->
+            <section>
+                <h2>📖 スロークエリログの読み方</h2>
+                <pre><code># Time: 2024-01-15T10:30:45.123456Z
+# User@Host: trainee[trainee] @ localhost []
+# Query_time: 2.456789  Lock_time: 0.000123
+# Rows_sent: 100  Rows_examined: 500000
+SET timestamp=1705316445;
+SELECT u.name, COUNT(o.id) as order_count
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.id;</code></pre>
+                <div class="fragment">
+                    <ul>
+                        <li><strong>Query_time:</strong> クエリの実行時間</li>
+                        <li><strong>Lock_time:</strong> ロック待機時間</li>
+                        <li><strong>Rows_sent:</strong> クライアントに送信された行数</li>
+                        <li><strong>Rows_examined:</strong> 調査された行数（効率の指標）</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- mysqldumpslowによる集計 -->
+            <section>
+                <h2>📊 mysqldumpslowによる集計</h2>
+                <pre><code class="language-bash"># スロークエリの集計
+docker exec -it mysql-training \
+    mysqldumpslow -s t /var/log/mysql/slow.log
+
+# 主要オプション
+# -s t: 合計時間でソート
+# -s c: 実行回数でソート
+# -s at: 平均実行時間でソート
+# -t 10: TOP10のみ表示
+# -g pattern: パターンマッチ
+
+# 例：TOP10の重いクエリ
+docker exec -it mysql-training \
+    mysqldumpslow -s t -t 10 /var/log/mysql/slow.log</code></pre>
+            </section>
+
+            <!-- パフォーマンススキーマの活用 -->
+            <section>
+                <h2>🎛️ パフォーマンススキーマの活用</h2>
+                <pre><code class="language-sql">-- パフォーマンススキーマ有効化確認
+SHOW VARIABLES LIKE 'performance_schema';
+
+-- 最も時間のかかったクエリTOP10
+SELECT
+    DIGEST_TEXT as query,
+    COUNT_STAR as exec_count,
+    SUM_TIMER_WAIT/1000000000000 as total_time_sec,
+    AVG_TIMER_WAIT/1000000000000 as avg_time_sec,
+    SUM_ROWS_EXAMINED as total_rows_examined,
+    SUM_ROWS_SENT as total_rows_sent
+FROM performance_schema.events_statements_summary_by_digest
+ORDER BY total_time_sec DESC
+LIMIT 10;</code></pre>
+            </section>
+
+            <!-- 実践的な分析フロー -->
+            <section>
+                <h2>🔄 実践的な分析フロー</h2>
+                <div class="analysis-flow">
+                    <div class="fragment">
+                        <h3>1. 定期的な確認</h3>
+                        <pre><code class="language-sql">-- 日次でスロークエリ数を確認
+SELECT
+    DATE(start_time) as date,
+    COUNT(*) as slow_query_count,
+    AVG(query_time) as avg_query_time
+FROM mysql.slow_log
+WHERE query_time > 1
+GROUP BY DATE(start_time)
+ORDER BY date DESC;</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 問題クエリの特定 -->
+            <section>
+                <h2>🎯 問題クエリの特定</h2>
+                <div class="fragment">
+                    <h3>2. 問題クエリの特定</h3>
+                    <pre><code class="language-bash"># 実行時間が長いクエリTOP5
+docker exec -it mysql-training \
+    mysqldumpslow -s t -t 5 /var/log/mysql/slow.log
+
+# 実行回数が多いクエリTOP5
+docker exec -it mysql-training \
+    mysqldumpslow -s c -t 5 /var/log/mysql/slow.log</code></pre>
+                </div>
+                <div class="fragment">
+                    <h3>3. クエリの改善</h3>
+                    <pre><code class="language-sql">-- 特定したクエリをEXPLAINで分析
+EXPLAIN [問題のクエリ];
+
+-- インデックス追加やクエリ書き換えで改善</code></pre>
+                </div>
+            </section>
+
+            <!-- 監視の自動化 -->
+            <section>
+                <h2>🤖 監視の自動化</h2>
+                <pre><code class="language-bash">#!/bin/bash
+# check_slow_queries.sh
+
+THRESHOLD=10
+COUNT=$(docker exec mysql-training \
+    mysql -uroot -prootpassword -e \
+    "SELECT COUNT(*) FROM mysql.slow_log \
+     WHERE query_time > 1 AND command_type = 'Query' \
+     AND start_time > DATE_SUB(NOW(), INTERVAL 1 HOUR)" \
+    -s -N)
+
+if [ $COUNT -gt $THRESHOLD ]; then
+    echo "Alert: $COUNT slow queries in the last hour"
+    # メール通知やSlack通知を追加
+    # curl -X POST https://hooks.slack.com/...
+fi</code></pre>
+                <div class="fragment">
+                    <p><strong>💡 ヒント:</strong> cronで定期実行して自動監視</p>
+                </div>
+            </section>
+
+            <!-- 重要なメトリクス -->
+            <section>
+                <h2>📈 重要なメトリクス</h2>
+                <ul>
+                    <li class="fragment"><strong>Query_time:</strong> 実行時間の絶対値</li>
+                    <li class="fragment"><strong>Rows_examined / Rows_sent:</strong> 効率性の指標</li>
+                    <li class="fragment"><strong>実行頻度:</strong> 影響度の大きさ</li>
+                    <li class="fragment"><strong>Lock_time:</strong> 排他制御の問題</li>
+                </ul>
+                <div class="fragment">
+                    <p><strong>判断基準:</strong></p>
+                    <ul>
+                        <li>Rows_examined / Rows_sent が 100倍以上 → 非効率</li>
+                        <li>Query_time が 5秒以上 → 要改善</li>
+                        <li>Lock_time が Query_time の 10% 以上 → ロック競合</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 実践演習 -->
+            <section>
+                <h2>💻 実践演習: スロークエリの改善</h2>
+                <pre><code class="language-sql">-- わざと遅いクエリを実行
+SELECT
+    p.name,
+    p.price,
+    (SELECT COUNT(*) FROM order_items WHERE product_id = p.id) as sold_count,
+    (SELECT AVG(quantity) FROM order_items WHERE product_id = p.id) as avg_quantity
+FROM products p
+WHERE p.category_id IN (1,2,3,4,5)
+ORDER BY sold_count DESC
+LIMIT 100;</code></pre>
+                <div class="fragment">
+                    <h3>改善案</h3>
+                    <pre><code class="language-sql">-- JOINとGROUP BYを使用
+SELECT
+    p.name,
+    p.price,
+    COUNT(oi.id) as sold_count,
+    AVG(oi.quantity) as avg_quantity
+FROM products p
+LEFT JOIN order_items oi ON p.id = oi.product_id
+WHERE p.category_id IN (1,2,3,4,5)
+GROUP BY p.id
+ORDER BY sold_count DESC
+LIMIT 100;</code></pre>
+                </div>
+            </section>
+
+            <!-- トラブルシューティング -->
+            <section>
+                <h2>🔧 トラブルシューティング</h2>
+                <div class="troubleshooting">
+                    <div class="fragment">
+                        <h3>ログが出力されない場合</h3>
+                        <ul>
+                            <li>ファイルのパーミッション確認</li>
+                            <li>ディスク容量の確認</li>
+                            <li>設定値の再確認</li>
+                        </ul>
+                    </div>
+                    <div class="fragment">
+                        <h3>ログファイルが大きくなりすぎた場合</h3>
+                        <pre><code class="language-bash"># ログローテーション
+mv /var/log/mysql/slow.log /var/log/mysql/slow.log.old
+mysqladmin flush-logs</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 確認課題 -->
+            <section>
+                <h2>✅ 確認課題</h2>
+                <ol>
+                    <li class="fragment">過去24時間のスロークエリを集計してください</li>
+                    <li class="fragment">最も頻繁に実行される遅いクエリを特定してください</li>
+                    <li class="fragment">Rows_examined / Rows_sent の比率が高いクエリを改善してください</li>
+                    <li class="fragment">自動監視スクリプトを作成してください</li>
+                </ol>
+                <div class="fragment">
+                    <p><strong>💡 ヒント:</strong> mysqldumpslowとperformance_schemaを組み合わせて活用</p>
+                </div>
+            </section>
+
+            <!-- まとめ -->
+            <section>
+                <h2>📝 Day 4 まとめ</h2>
+                <ul>
+                    <li class="fragment">スロークエリログは問題発見の重要な手段</li>
+                    <li class="fragment">設定は動的・永続的両方で可能</li>
+                    <li class="fragment">mysqldumpslowで効率的に分析</li>
+                    <li class="fragment">パフォーマンススキーマで詳細な分析</li>
+                    <li class="fragment">自動監視で継続的な改善</li>
+                </ul>
+                <div class="fragment">
+                    <p><strong>次は実践的なインデックス設計を学習しましょう!</strong></p>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section data-background-gradient="linear-gradient(to bottom, #17b2c3, #283b95)">
+                <h2>🎯 Next: インデックス設計の実践</h2>
+                <p class="fragment">実際のクエリパターンに基づいたインデックス設計を学ぼう</p>
+                <div class="fragment">
+                    <a href="day5.html" class="cta-button">Day 5: インデックス設計の実践へ →</a>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="day3.html">← Day 3</a>
+                    <a href="index.html">目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>

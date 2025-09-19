@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Day 2: インデックスの基本 - MySQL クエリチューニング研修</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/theme/moon.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/monokai.css">
+    <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- タイトル -->
+            <section data-background-gradient="linear-gradient(to bottom, #283b95, #17b2c3)">
+                <h1>Day 2</h1>
+                <h2>インデックスの基本</h2>
+                <p>データベース検索の高速化を支える仕組みを理解する</p>
+                <nav class="slide-nav">
+                    <a href="day1.html">← Day 1</a>
+                    <a href="index.html">目次</a>
+                    <a href="day3.html">Day 3 →</a>
+                </nav>
+            </section>
+
+            <!-- 学習目標 -->
+            <section>
+                <h2>🎯 学習目標</h2>
+                <ul>
+                    <li class="fragment">インデックスの仕組みを理解する</li>
+                    <li class="fragment">適切なインデックスを設計できる</li>
+                    <li class="fragment">インデックスの効果を測定できる</li>
+                    <li class="fragment">インデックスのトレードオフを把握する</li>
+                </ul>
+            </section>
+
+            <!-- インデックスとは -->
+            <section>
+                <h2>📚 インデックスとは？</h2>
+                <div class="fragment">
+                    <p><strong>📖 本の目次や索引と同じ概念</strong></p>
+                    <ul>
+                        <li>データの「場所」を素早く特定</li>
+                        <li>全ページ（全レコード）を読まずに済む</li>
+                        <li>検索速度が劇的に向上</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <p><strong>💾 データベースでの役割</strong></p>
+                    <ul>
+                        <li>WHERE句の検索条件を高速化</li>
+                        <li>JOIN条件の結合処理を効率化</li>
+                        <li>ORDER BYのソート処理を最適化</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- インデックスなしの検索 -->
+            <section>
+                <h2>🐌 インデックスなしでの検索</h2>
+                <pre><code class="language-sql">-- 実行時間を測定
+SET profiling = 1;
+
+-- インデックスなしで検索（フルテーブルスキャン）
+SELECT * FROM users WHERE email = 'user500000@example.com';
+
+-- 実行時間確認
+SHOW PROFILES;</code></pre>
+                <div class="fragment">
+                    <p><strong>⚠️ 問題点:</strong></p>
+                    <ul>
+                        <li>100万レコード全てをスキャン</li>
+                        <li>検索時間が長い（数秒〜数十秒）</li>
+                        <li>CPU・I/Oリソースを大量消費</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- インデックス作成と効果 -->
+            <section>
+                <h2>🚀 インデックス作成と効果</h2>
+                <pre><code class="language-sql">-- インデックス作成
+CREATE INDEX idx_users_email ON users(email);
+
+-- 同じクエリを再実行
+SELECT * FROM users WHERE email = 'user500000@example.com';
+
+-- 実行時間を比較
+SHOW PROFILES;
+
+-- インデックス使用状況確認
+SHOW INDEX FROM users;</code></pre>
+                <div class="fragment">
+                    <p><strong>✨ 効果:</strong></p>
+                    <ul>
+                        <li>検索時間が1000分の1以下に短縮</li>
+                        <li>CPUとI/Oの大幅な削減</li>
+                        <li>同時アクセス性能の向上</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- インデックスの種類 -->
+            <section>
+                <h2>🔍 インデックスの種類</h2>
+                <div class="join-types">
+                    <div class="fragment">
+                        <h3>PRIMARY KEY</h3>
+                        <p>主キー（自動作成）<br>一意性保証</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>UNIQUE INDEX</h3>
+                        <p>一意制約付き<br>重複を許可しない</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>NORMAL INDEX</h3>
+                        <p>通常のインデックス<br>最も一般的</p>
+                    </div>
+                    <div class="fragment">
+                        <h3>COMPOSITE INDEX</h3>
+                        <p>複合インデックス<br>複数カラムの組み合わせ</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 複合インデックス -->
+            <section>
+                <h2>🔗 複合インデックス</h2>
+                <pre><code class="language-sql">-- 複数カラムのインデックス（順序が重要！）
+CREATE INDEX idx_orders_user_status ON orders(user_id, status);</code></pre>
+                <div class="comparison">
+                    <div class="good-example fragment">
+                        <h3>✅ このインデックスが効く例</h3>
+                        <pre><code class="language-sql">SELECT * FROM orders WHERE user_id = 1000;
+SELECT * FROM orders
+WHERE user_id = 1000 AND status = 'completed';</code></pre>
+                    </div>
+                    <div class="bad-example fragment">
+                        <h3>❌ このインデックスが効かない例</h3>
+                        <pre><code class="language-sql">-- user_idがないため
+SELECT * FROM orders WHERE status = 'completed';</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- カーディナリティ -->
+            <section>
+                <h2>📊 カーディナリティを考慮</h2>
+                <pre><code class="language-sql">-- カーディナリティ（値の種類）を確認
+SELECT
+    COUNT(DISTINCT status) as status_cardinality,
+    COUNT(DISTINCT user_id) as user_id_cardinality,
+    COUNT(*) as total_rows
+FROM orders;</code></pre>
+                <div class="fragment">
+                    <p><strong>💡 設計原則:</strong></p>
+                    <ul>
+                        <li><strong>カーディナリティが高いカラムを先に</strong></li>
+                        <li>選択性の良い条件から順に配置</li>
+                        <li>フィルタリング効果の高い順序</li>
+                    </ul>
+                </div>
+                <div class="fragment">
+                    <pre><code class="language-sql">-- 最適化された複合インデックス
+CREATE INDEX idx_orders_optimized
+ON orders(user_id, status, ordered_at);</code></pre>
+                </div>
+            </section>
+
+            <!-- カバリングインデックス -->
+            <section>
+                <h2>🛡️ カバリングインデックス</h2>
+                <pre><code class="language-sql">-- クエリに必要な全カラムをインデックスに含める
+CREATE INDEX idx_orders_covering
+ON orders(user_id, status, total_amount, ordered_at);
+
+-- インデックスのみで結果を返せる（高速）
+SELECT user_id, status, total_amount
+FROM orders
+WHERE user_id = 1000 AND status = 'completed';</code></pre>
+                <div class="fragment">
+                    <p><strong>🎯 メリット:</strong></p>
+                    <ul>
+                        <li>テーブルデータへのアクセスが不要</li>
+                        <li>I/Oが大幅に削減される</li>
+                        <li>EXPLAINで「Using index」が表示</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- インデックスのコスト -->
+            <section>
+                <h2>⚖️ インデックスのトレードオフ</h2>
+                <div class="comparison">
+                    <div class="good-example fragment">
+                        <h3>✅ メリット</h3>
+                        <ul>
+                            <li>SELECT の高速化</li>
+                            <li>WHERE句の検索向上</li>
+                            <li>JOIN の効率化</li>
+                            <li>ORDER BY の最適化</li>
+                        </ul>
+                    </div>
+                    <div class="bad-example fragment">
+                        <h3>❌ デメリット</h3>
+                        <ul>
+                            <li>INSERT/UPDATE/DELETE の低下</li>
+                            <li>ディスク使用量の増加</li>
+                            <li>メンテナンスコストの増加</li>
+                            <li>不要なインデックスは害</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- インデックス効果測定 -->
+            <section>
+                <h2>📈 インデックス効果測定</h2>
+                <pre><code class="language-sql">-- EXPLAIN で実行計画確認（インデックス前）
+EXPLAIN SELECT * FROM orders WHERE total_amount > 10000;
+-- type: ALL（フルテーブルスキャン）
+
+-- インデックス作成
+CREATE INDEX idx_orders_amount ON orders(total_amount);
+
+-- 再度EXPLAIN実行（インデックス後）
+EXPLAIN SELECT * FROM orders WHERE total_amount > 10000;
+-- type: range（インデックス範囲検索）</code></pre>
+                <div class="fragment">
+                    <p><strong>📊 改善指標:</strong></p>
+                    <ul>
+                        <li>type が ALL → range, ref, const に変化</li>
+                        <li>rows（調査行数）の大幅減少</li>
+                        <li>実行時間の短縮</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- インデックス設計の実践演習 -->
+            <section>
+                <h2>💻 実践演習</h2>
+                <p>以下のクエリを高速化するインデックスを設計してください</p>
+                <pre><code class="language-sql">SELECT
+    u.name,
+    COUNT(o.id) as order_count
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+WHERE o.ordered_at >= '2024-01-01'
+    AND o.status = 'completed'
+GROUP BY u.id;</code></pre>
+                <div class="fragment">
+                    <p><strong>💡 解答例:</strong></p>
+                    <pre><code class="language-sql">-- フィルタ条件を効率化するインデックス
+CREATE INDEX idx_orders_optimization
+ON orders(status, ordered_at, user_id);</code></pre>
+                </div>
+            </section>
+
+            <!-- インデックス管理 -->
+            <section>
+                <h2>🛠️ インデックスの管理</h2>
+                <pre><code class="language-sql">-- 未使用インデックスの確認
+SELECT
+    table_name,
+    index_name,
+    stat_value as cardinality
+FROM mysql.innodb_index_stats
+WHERE database_name = 'training_db'
+    AND stat_name = 'n_diff_pfx01'
+ORDER BY table_name, index_name;
+
+-- 不要なインデックスを削除
+DROP INDEX idx_orders_amount ON orders;</code></pre>
+                <div class="fragment">
+                    <p><strong>🧹 定期メンテナンス:</strong></p>
+                    <ul>
+                        <li>未使用インデックスの削除</li>
+                        <li>重複インデックスの整理</li>
+                        <li>統計情報の更新</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- 確認課題 -->
+            <section>
+                <h2>✅ 確認課題</h2>
+                <ol>
+                    <li class="fragment">users テーブルの検索を高速化するインデックスを設計</li>
+                    <li class="fragment">月次レポートクエリ用の最適なインデックスを作成</li>
+                    <li class="fragment">インデックス追加前後でのパフォーマンス差を測定</li>
+                </ol>
+                <div class="fragment">
+                    <p><strong>🔬 測定方法:</strong></p>
+                    <pre><code class="language-sql">-- プロファイリングで実行時間比較
+SET profiling = 1;
+[クエリ実行]
+SHOW PROFILES;</code></pre>
+                </div>
+            </section>
+
+            <!-- まとめ -->
+            <section>
+                <h2>📝 Day 2 まとめ</h2>
+                <ul>
+                    <li class="fragment">インデックスは検索の高速化に不可欠</li>
+                    <li class="fragment">複合インデックスは順序が重要</li>
+                    <li class="fragment">カーディナリティの高いカラムを先に配置</li>
+                    <li class="fragment">カバリングインデックスでI/Oを削減</li>
+                    <li class="fragment">トレードオフを理解して適切に運用</li>
+                </ul>
+                <div class="fragment">
+                    <p><strong>次はEXPLAINでクエリの内部動作を見える化します!</strong></p>
+                </div>
+            </section>
+
+            <!-- 次のステップ -->
+            <section data-background-gradient="linear-gradient(to bottom, #17b2c3, #283b95)">
+                <h2>🔍 Next: EXPLAINの読み方</h2>
+                <p class="fragment">インデックスの効果を実行計画で確認しよう</p>
+                <div class="fragment">
+                    <a href="day3.html" class="cta-button">Day 3: EXPLAINの読み方へ →</a>
+                </div>
+                <nav class="slide-nav fragment">
+                    <a href="day1.html">← Day 1</a>
+                    <a href="index.html">目次に戻る</a>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/dist/reveal.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/notes/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/markdown/markdown.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.0.4/plugin/highlight/highlight.js"></script>
+    <script src="js/reveal-config.js"></script>
+</body>
+</html>
