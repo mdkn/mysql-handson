@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-training
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: training_db
+      MYSQL_USER: trainee
+      MYSQL_PASSWORD: traineepass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init:/docker-entrypoint-initdb.d
+      - ./logs:/var/log/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --slow_query_log=1
+      --slow_query_log_file=/var/log/mysql/slow.log
+      --long_query_time=1
+      --log_queries_not_using_indexes=1
+      --general_log=1
+      --general_log_file=/var/log/mysql/general.log
+
+volumes:
+  mysql_data:
